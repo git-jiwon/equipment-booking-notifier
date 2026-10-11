@@ -1,0 +1,34 @@
+# Local credentials and deployment identifiers
+.env
+.env.*
+!.env.example
+.clasp.json
+.clasprc.json
+.clasprc.*.json
+credentials*.json
+client_secret*.json
+service-account*.json
+*.pem
+*.key
+
+# Private configuration, data, logs and backups
+*.local.*
+local/
+private/
+backups/
+exports/
+*.log
+*.csv
+*.tsv
+*.xlsx
+*.zip
+
+# Tools and scratch files
+node_modules/
+coverage/
+temp/
+tmp/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

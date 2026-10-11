@@ -1,0 +1,12 @@
+{
+  "name": "equipment-booking-notifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Anonymous Google Apps Script equipment booking notification example",
+  "scripts": {
+    "test": "node scripts/test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
