@@ -54,9 +54,19 @@ SENDER_NAME: 'Equipment Booking',
 REPORT_CC: [],
 DAY_LIMIT_EXEMPT: [],
 LOG_PERSONAL_DETAILS: false,
+GROUP_FOOTER: '',
+FOOTER_LANG: 'en',
+TEST_GROUP_EMAIL: '',
+GROUP_NAME: 'Example Equipment Group',
 ```
 
 `GROUP_EMAIL` is the address of a group you create. Remove any unused example administrator addresses. `REPORT_CC` adds briefing recipients. Add actual calendar IDs to `DAY_LIMIT_EXEMPT` only for equipment that needs an exemption from the daily limit. Enter only one email address in each individual recipient field.
+
+`GROUP_FOOTER: ''` keeps the existing footer behavior. `'notice'` adds a small gray notice under `--` in `FOOTER_LANG` (`en` or `ko`) and uses HTML styling intended to hide the standard Google Groups footer. `GROUP_NAME` is the group name shown in the notice. For supported `googlegroups.com` addresses, the notice contains the group name, unsubscribe address, and past-messages link, with each line in a separate table cell. For other addresses, it asks members to contact the group manager instead. Confirm the result in the receiving mail app: Groups or the app may rewrite the HTML.
+
+Check the group's [Email footer settings](https://support.google.com/groups/answer/2464926?hl=en) before enabling the optional notice. Google Groups provides standard and custom footer settings; available controls depend on the group configuration.
+
+Set `TEST_GROUP_EMAIL` to one test group address before running `testFooterMail`. Its membership and archive access must be restricted to authorized administrators because the test contains **current booking details**, rather than fictional sample bookings. The function tests the notice even when `GROUP_FOOTER` is empty.
 
 6. Run the following steps in order and authorize the required permissions.
 
@@ -74,7 +84,9 @@ LOG_PERSONAL_DETAILS: false,
 
 The installation week is only partially observed, so its statistics are skipped. Briefings begin the following Monday, and previous-week statistics are included once a full week has been observed. Time-based triggers do not guarantee delivery at exactly 09:00.
 
-If you use clasp, upload only `src/`. Do not deploy `tests/` or fixtures from older versions. Keep authentication files and project ID files out of Git as well.
+Monday briefing subjects use a short date range, for example `[장비예약] 10/12(월)~10/19(월) 예약 내역`. The HTML body's first line shows the period including times. The script logs whether a briefing was sent, deferred, failed, or disabled. Every HTML email includes a viewport header for mobile screens.
+
+If you use clasp, upload only `src/`. Do not deploy `tests/`. Keep authentication files and project ID files out of Git as well.
 
 ## Sheets and example bookers
 
@@ -82,18 +94,20 @@ The script creates sheets with the following Korean names. Keep these names when
 
 | Sheet | English meaning | Contents |
 |---|---|---|
+| `예약기록` | Booking log | Registration, booking, and cancellation times; status; booker; original title; creator account; rule checks; and internal IDs. |
+| `주간보고` | Weekly report | Counts of usage, cancellations, and late cancellations, plus fulfillment rates and dates. Appended every Monday; the script does not read it, so briefings still go out if it is deleted. |
 | `장비` | Equipment | Display name, calendar ID, enabled status, and access permissions. |
 | `사용자` | Users | Canonical name, comma-separated aliases, and optional individual email address. |
-| `예약기록` | Booking log | Registration, booking, and cancellation times; status; booker; original title; creator account; rule checks; and internal IDs. |
-| `주간보고` | Weekly report | Counts of usage, cancellations, and late cancellations, plus fulfillment rates and dates. |
+
+Tabs are kept in the order above (`setup` and `arrangeSheetTabs` arrange them). The script finds sheets by name, so reordering tabs does not change its behavior.
 
 The booker's name is parsed from the event title. `UserA (Sample)` is read as `UserA`, and `[Equipment A] UserB` is read as `UserB`. `UserA for class - UserB` is read as a class booking for `UserB`. These are fictional examples; the Korean name-parsing examples use the fictional names `가나` and `다라`.
 
 New names are automatically added to the user sheet. Group different spellings of the same person's name as aliases in the canonical name's row. The email in the user sheet takes precedence; if it is absent, individual mail is sent to the account that created the event. Administrator, group, and calendar accounts are not used as individual recipients. Invalid individual addresses cause the notice to be sent to an administrator instead.
 
-The booking log is sorted by registration time in descending order. Columns are located by their headers, so you may reorder them, but **keep the column headers unchanged**. Internal ID columns are hidden. Hiding columns and protecting sheets from editing do not restrict read access.
+The booking log is sorted by registration time in descending order. Columns are located by their headers, so you may reorder them, but **keep the exact column headers in row 1 unchanged**. An old header such as `늦은취소`, or a blank header, is not treated as the current header; missing current columns are appended at the right edge. Internal ID columns are hidden. Hiding columns and protecting sheets from editing do not restrict read access.
 
-When migrating an older sheet structure, the original is preserved in the `예약기록_백업` (booking log backup) sheet. It is also used for recovery verification; review it before deleting it. The weekly fulfillment rate is `usage / (usage + late cancellations)`. It does not measure actual equipment use.
+The weekly fulfillment rate is `usage / (usage + late cancellations)`. It does not measure actual equipment use.
 
 ## Administration functions
 
@@ -103,6 +117,8 @@ When migrating an older sheet structure, the original is preserved in the `예�
 - `explainFlags`: Provides detailed diagnostics for rule violations. Detailed logs are output only when `LOG_PERSONAL_DETAILS` is enabled.
 - `initialSync`: Initializes records for a newly added equipment calendar.
 - `resetSync`: Rereads all calendars without notifications and reconciles them with existing records.
+- `arrangeSheetTabs`: Orders the sheet tabs as 예약기록 (booking log) · 주간보고 (weekly report) · 장비 (equipment) · 사용자 (users); other tabs follow.
+- `testFooterMail`: Sends one notice-format briefing with current booking details to `TEST_GROUP_EMAIL` in Config.gs, a separate test group restricted to authorized administrators. Uses `FOOTER_LANG` (`en` or `ko`) and adds the notice regardless of the current `GROUP_FOOTER` setting. Check the received footer and its links in the mail apps you use.
 
 ## Group and phone notifications
 
@@ -130,20 +146,18 @@ Only Node.js is required; no external packages need to be installed. Tests use m
 npm test
 ```
 
-In PowerShell, you can also check a different file-loading order and recovery sort order:
+In PowerShell, you can also check a different file-loading order:
 
 ```powershell
 $env:SIM_ORDER = 'alpha'
-$env:ORDER = 'oldest'
 npm test
-Remove-Item Env:SIM_ORDER, Env:ORDER
+Remove-Item Env:SIM_ORDER
 ```
 
 | Test | Coverage |
 |---|---|
 | `rules.test.js` | Week boundaries, sessions, late cancellation, title parsing, and overlap priority. |
 | `sim.test.js` | Installation, synchronization, notifications, and briefing scenarios. |
-| `recovery.test.js`, `recovery-extra.test.js`, `verify-v4.test.js` | Recovery of registration times and classifications from older sheets and backups. |
 | `security.test.js` | Formula input, special names, recipients and headers, detailed logs, and failure retries. |
 | `privacy.test.js` | Email addresses, computer paths, and common secret patterns in public files. |
 
@@ -155,13 +169,12 @@ Run individual tests with commands such as `node tests/rules.test.js`. Set `SIM_
 |---|---|
 | `src/Config.gs` | Public example configuration and booking policy. |
 | `src/Rules.gs` | Booking, cancellation, overlap, and statistics rules. |
-| `src/Store.gs` | Sheet storage and recovery. |
+| `src/Store.gs` | Sheet storage. |
 | `src/Sync.gs` | Calendar change detection and state handling. |
 | `src/Notify.gs` | Notification queue, address validation, and email. |
 | `src/Report.gs` | Monday briefings and weekly reports. |
 | `src/Setup.gs` | Installation, access checks, triggers, and diagnostics. |
 | `src/appsscript.json` | Permissions for reading calendars, accessing the current spreadsheet, sending email, and managing triggers. |
-| `tests/fixtures/src-v3/` | Anonymized recovery fixtures from an older version. Do not deploy them. |
 
 ## Limitations
 
@@ -171,4 +184,6 @@ Run individual tests with commands such as `node tests/rules.test.js`. Set `SIM_
 - Converting a timed event to an all-day event is treated as a booking cancellation.
 - Failed emails are retried on the next synchronization. Pending notifications are removed once the slot has passed or they have waited for 24 hours.
 - If calendar reads fail on Monday, the briefing is delayed by up to 30 minutes. After that, the briefing may omit calendars that could not be read.
+- Changing `DAY_LIMIT_EXEMPT` does not immediately remove existing daily-limit flags from the booking log. They are recalculated when an event on the affected equipment calendar changes.
+- The notice footer is also visible to direct CC recipients of group mail, including `CC_ADMIN` and `REPORT_CC` recipients. Its membership wording and unsubscribe link refer to the group; a direct CC recipient may not be a group member.
 - Mock tests do not guarantee real service permissions, quotas, or email delivery. Confirm administrator and group test emails after installation.

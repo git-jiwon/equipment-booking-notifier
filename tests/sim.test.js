@@ -182,7 +182,7 @@ scenario('3', '월 09:00: 이번 주 브리핑(중복 우선순위·규칙 확�
   check(b && e.mails.length === 1, '브리핑 1통(설치한 주의 보고는 건너뜀)', text(e.mails));
   if (!b) return;
   eq(b.to, GROUP, '브리핑은 그룹으로');
-  eq(b.subject, '[장비예약] 10/12(월) 09:00 ~ 10/19(월) 09:00 예약 내역', '제목');
+  eq(b.subject, '[장비예약] 10/12(월)~10/19(월) 예약 내역', '제목(휴대폰 한 줄: 날짜만)');
   has(b.body, '1순위 UserE', '순위는 캘린더 등록 순만(10/10 등록이 1순위)');
   has(b.body, '2순위 UserB', '2순위 = 18:00:03');
   has(b.body, '3순위 UserA', '3순위 = 18:00:41');
@@ -468,7 +468,7 @@ scenario('14', '주간 보고 계산, 미리보기는 관리자에게만, 트리
   syncOk(w, '2026-10-12T12:05');
   w.at('2026-10-16T12:00'); const p = w.run('previewMondayMails'); runOk(p);
   check(p.mails.length === 1 && p.mails.every(m => m.to === ADMIN_TO), '미리보기 1통, 관리자에게만', text(p.mails));
-  has(p.mails[0] && p.mails[0].subject, '[미리보기] [장비예약] 10/19(월) 09:00 ~ 10/26(월) 09:00 예약 내역', '이번 주 브리핑을 보낸 뒤면 다음 월요일 것을 미리 봄');
+  has(p.mails[0] && p.mails[0].subject, '[미리보기] [장비예약] 10/19(월)~10/26(월) 예약 내역', '이번 주 브리핑을 보낸 뒤면 다음 월요일 것을 미리 봄');
   has(p.mails[0] && p.mails[0].body, 'UserA  직전 취소 1건', '미리보기에 이번 주(다음 월요일의 지난주) 직전 취소');
   const e = syncOk(w, '2026-10-19T09:00:20');
   const r = e.mails.find(isRep);
@@ -802,7 +802,7 @@ scenario('31', '시트 보호: 4개 시트를 관리자만 수정, 여러 번 �
 });
 
 // ================================================================== 32
-scenario('32', '정기예약 기간에 만든 반복 일정(화~목) = 정기예약, 예전 이름(우선예약)·예전 반복 구분은 자동으로 다시 매김', () => {
+scenario('32', '정기예약 기간에 만든 반복 일정(화~목) = 정기예약', () => {
   const w = boot();
   at(w, '2026-10-11T18:00:29');
   const ids = w.calendar.createRecurring(CAL.TE1, { summary: 'UserE(Ag)', start: '2026-10-13T12:00', end: '2026-10-13T15:00' },
@@ -810,17 +810,6 @@ scenario('32', '정기예약 기간에 만든 반복 일정(화~목) = 정기예
   syncOk(w, '2026-10-11T18:05');
   eq(ids.map(id => lastRow(w, id)['등록구분']), ['정기예약', '정기예약', '정기예약'], '반복 일정도 정기예약');
   eq(ids.map(id => lastRow(w, id)['위반']), ['', '', ''], '날마다 1세션이라 위반 없음');
-  // 예전 코드가 남긴 기록: 「우선예약」(옛 이름), 미리 만든 반복 일정을 「정기예약」으로 적은 것
-  at(w, '2026-10-11T18:20');
-  const old = w.calendar.create(CAL.SPUT, { summary: 'UserD', start: '2026-10-20T09:00', end: '2026-10-20T12:00', created: '2026-10-01T10:00' });
-  syncOk(w, '2026-10-11T18:25');
-  const sh = w.sheet('예약기록');
-  const col = sh.cells[0].indexOf('등록구분') + 1;
-  sh.getRange(lastRow(w, ids[0])._row, col).setValue('우선예약');
-  sh.getRange(lastRow(w, old)._row, col).setValue('정기예약');
-  w.props.delete('kindsVersion');
-  syncOk(w, '2026-10-11T18:30');
-  eq([lastRow(w, ids[0])['등록구분'], lastRow(w, old)['등록구분']], ['정기예약', '기간전예약'], '다음 동기화에서 다시 매김');
 });
 
 // ================================================================== 33
@@ -905,20 +894,12 @@ scenario('35', '위반 표시는 다시 계산(겹침이 풀리면 지움), 사�
 });
 
 // ================================================================== 36
-scenario('36', '[Fix] 점검 일정: 예약자 「점검」, 사용자 시트·이행률·직전 취소에서 제외, 겹침은 표시(점검이 1순위), 옛 기록도 점검으로', () => {
+scenario('36', '[Fix] 점검 일정: 예약자 「점검」, 사용자 시트·이행률·직전 취소에서 제외, 겹침은 표시(점검이 1순위)', () => {
   const ids = {};
   const w = boot();
-  // 옛 코드가 사람 이름으로 남긴 [Fix] 기록을 흉내: 일단 기록된 뒤 구분을 되돌림
   at(w, '2026-10-11T11:51'); ids.old = ev(w, CAL.TE1, '[Fix] Evaporator', '2026-10-11T14:00', '2026-10-12T13:00');
   syncOk(w, '2026-10-11T11:55');
   eq([lastRow(w, ids.old)['예약자'], lastRow(w, ids.old)['등록구분']], ['점검', '점검'], '[Fix] = 점검');
-  const sh = w.sheet('예약기록');
-  const c = n => sh.cells[0].indexOf(n) + 1;
-  sh.getRange(lastRow(w, ids.old)._row, c('예약자')).setValue('Evaporator');
-  sh.getRange(lastRow(w, ids.old)._row, c('등록구분')).setValue('추가예약');
-  w.props.delete('kindsVersion');
-  syncOk(w, '2026-10-11T12:00');
-  eq([lastRow(w, ids.old)['예약자'], lastRow(w, ids.old)['등록구분']], ['점검', '점검'], '옛 기록도 점검으로 다시 매김');
   eq(w.table('사용자').some(r => /Evaporator|점검/.test(r['대표 이름'])), false, '사용자 시트에 들어가지 않음');
   // 점검과 겹치는 예약: 겹침 표시, 순위는 점검 먼저
   at(w, '2026-10-11T21:51'); ids.j = ev(w, CAL.TE1, 'UserF(Ag)', '2026-10-12T09:00', '2026-10-12T12:00');
@@ -941,7 +922,7 @@ scenario('36', '[Fix] 점검 일정: 예약자 「점검」, 사용자 시트·�
 });
 
 // ================================================================== 37
-scenario('37', '하루 제한 제외 장비(DAY_LIMIT_EXEMPT): 그 장비는 하루 1세션 초과 표시 없음, 바꾼 뒤 옛 표시도 지움', () => {
+scenario('37', '하루 제한 제외 장비(DAY_LIMIT_EXEMPT): 그 장비는 하루 1세션 초과 표시 없음, 바꾼 뒤 그 장비에 변경이 생기면 옛 표시도 지움', () => {
   const ids = {};
   const w = boot();
   at(w, '2026-10-11T21:30'); ids.h = ev(w, CAL.AFM, 'UserG(AFM)', '2026-10-12T13:00', '2026-10-12T18:00');
@@ -949,7 +930,7 @@ scenario('37', '하루 제한 제외 장비(DAY_LIMIT_EXEMPT): 그 장비는 하
   syncOk(w, '2026-10-11T21:35');
   has(lastRow(w, ids.h)['위반'], '하루 1세션 초과', '제외 전: AFM 13~18 = 2세션 초과');
   w.configOverrides = { DAY_LIMIT_EXEMPT: [CAL.AFM] };
-  w.props.delete('kindsVersion');
+  at(w, '2026-10-11T21:38'); w.calendar.patch(CAL.AFM, ids.h, { end: '2026-10-12T17:00' }); // 그 장비에 변경이 생기면 다시 계산
   syncOk(w, '2026-10-11T21:40');
   eq(lastRow(w, ids.h)['위반'], '', 'AFM은 제외: 옛 표시도 지움');
   has(lastRow(w, ids.s)['위반'], '하루 1세션 초과', '다른 장비는 그대로');
@@ -975,77 +956,27 @@ scenario('38', '지난주 직전 취소 목록: 누적 직전 취소가 같으�
 });
 
 // ================================================================== 39
-scenario('39', '「예약기록」 열 순서: 예전 순서 시트는 백업한 뒤 한 번 옮겨 적고(값 그대로), 그 뒤 관리자가 바꾼 순서는 존중', () => {
+scenario('39', '「예약기록」 열: 사람이 보는 순서, 스크립트용 열 숨김, 관리자가 바꾼 순서도 열 제목으로 제자리에', () => {
   const NEW = ['등록시각', '예약자', '장비', '시작', '종료', '등록구분', '상태', '취소시각', '직전취소', '직전취소기준', '제외사유',
     '위반', '제목', '비고', '만든계정', '캘린더ID', '일정ID', '마감시작', '마감종료'];
-  const OLD = ['장비', '캘린더ID', '일정ID', '예약자', '제목', '시작', '종료', '등록시각', '등록구분', '상태', '취소시각', '직전취소',
-    '늦은취소기준', '위반', '만든계정', '비고', '순위시각', '마감시작', '마감종료', '판정사유'];
-  const OLD_TEXT = ['장비', '캘린더ID', '일정ID', '예약자', '제목', '등록구분', '상태', '직전취소', '위반', '만든계정', '비고', '판정사유'];
   const ids = {};
   const w = boot();
-  const sh = () => w.sheet('예약기록');
-  eq(sh().cells[0].slice(0, NEW.length), NEW, '새로 설치: 사람이 보는 순서');
-  eq([16, 17, 18, 19].map(c => sh().isColumnHiddenByUser(c)), [true, true, true, true], '캘린더ID·일정ID·마감시작·마감종료 숨김');
+  const s = w.sheet('예약기록');
+  eq(s.cells[0].slice(0, NEW.length), NEW, '새로 설치: 사람이 보는 순서');
+  eq([16, 17, 18, 19].map(c => s.isColumnHiddenByUser(c)), [true, true, true, true], '캘린더ID·일정ID·마감시작·마감종료 숨김');
   syncOk(w, '2026-10-12T09:00:20');
-  at(w, '2026-10-12T10:00'); ids.a = ev(w, CAL.AFM, 'UserA (BCP)', '2026-10-13T09:00', '2026-10-13T12:00');
-  ids.b = ev(w, CAL.SPUT, 'UserD', '2026-10-14T09:00', '2026-10-14T12:00');
-  syncOk(w, '2026-10-12T10:05');
-  at(w, '2026-10-13T09:30'); w.calendar.remove(CAL.AFM, ids.a);            // 사용 시작 뒤 지움 = 직전 취소
-  syncOk(w, '2026-10-13T09:35');
-  at(w, '2026-10-13T10:00'); ids.c = ev(w, CAL.TE1, 'UserF(Ag)', '2026-10-13T13:00', '2026-10-13T15:00');
-  syncOk(w, '2026-10-13T10:02');
-  at(w, '2026-10-13T10:04'); w.calendar.remove(CAL.TE1, ids.c);            // 사용일에 만들고 10분 안에 지움 = 유예
-  syncOk(w, '2026-10-13T10:06');
-  const before = w.rows().map(r => Object.assign({}, r));
-  eq([lastRow(w, ids.a)['직전취소'], lastRow(w, ids.c)['제외사유']], ['Y', '유예'], '옮기기 전 값');
-
-  // 예전 코드가 만든 시트처럼: 예전 열 순서·제목(늦은취소기준·판정사유), 쓰지 않던 순위시각 열
-  const s = sh();
-  const idx = h => NEW.indexOf(h === '늦은취소기준' ? '직전취소기준' : h === '판정사유' ? '제외사유' : h);
-  s.cells = s.cells.map((row, r) => OLD.map(h => (r === 0 ? h : h === '순위시각' ? { t: 'd', ms: kst('2026-10-01T00:00') } : idx(h) < row.length ? row[idx(h)] : '')));
-  s.textCols = new Set(OLD_TEXT.map(h => OLD.indexOf(h) + 1));
-  s.hidden = new Set();
-  w.props.delete('columnsVersion');
-  const nSheets = w.ss.getSheets().length;
-
-  const e = syncOk(w, '2026-10-13T10:10');
-  eq(s.cells[0].slice(0, s.getLastColumn()), NEW, '제목·순서가 새 열로(순위시각 없앰, 늦은취소기준→직전취소기준, 판정사유→제외사유)');
-  eq(s.cells.every(row => row.slice(NEW.length).every(v => v === '')), true, '오른쪽에 남은 예전 열 없음');
-  const bk = w.sheet('예약기록_백업');
-  eq([!!bk, w.ss.getSheets().length], [true, nSheets + 1], '원래 시트를 「예약기록_백업」으로 복사');
-  eq([bk && bk.cells[0][16], bk && bk.getLastRow(), bk && bk.getProtections().length], ['순위시각', s.getLastRow(), 1], '백업은 예전 그대로, 보호됨');
-  const keyOf = r => r['일정ID'] + '|' + r['시작'];
-  const after = new Map(w.rows().map(r => [keyOf(r), r]));
-  const fields = NEW;
-  const diff = [];
-  for (const r of before) {
-    const a = after.get(keyOf(r));
-    if (!a) { diff.push('없음 ' + keyOf(r)); continue; }
-    for (const f of fields) if (String(a[f]) !== String(r[f])) diff.push(keyOf(r) + ' ' + f + ': ' + r[f] + ' → ' + a[f]);
-  }
-  eq([diff, after.size], [[], before.length], '모든 기록의 값이 그대로 옮겨짐');
-  eq([NEW.indexOf('일정ID') + 1, NEW.indexOf('시작') + 1].map(c => s.textCols.has(c)), [true, false], '일정ID는 글자, 시작은 날짜 서식');
-  eq([16, 17, 18, 19].map(c => s.isColumnHiddenByUser(c)), [true, true, true, true], '옮긴 뒤 스크립트용 열 숨김');
-  has(e.logs.join('\n'), '열 순서를 바꿨습니다', '로그에 안내');
-
-  // 옮긴 뒤에도 기록·직전 취소 판정이 제 열에
   at(w, '2026-10-13T11:00'); ids.d = ev(w, CAL.SPUT, 'UserG', '2026-10-15T09:00', '2026-10-15T12:00');
   syncOk(w, '2026-10-13T11:05');
-  at(w, '2026-10-15T09:10'); w.calendar.remove(CAL.SPUT, ids.d);
-  const e2 = syncOk(w, '2026-10-15T09:15');
-  eq([lastRow(w, ids.d)['예약자'], lastRow(w, ids.d)['장비'], lastRow(w, ids.d)['직전취소'], lastRow(w, ids.d)['상태']],
-    ['UserG', NAMES.SPUT, 'Y', '취소'], '새 기록이 제 열에');
-  eq(e2.mails.filter(m => /^\[예약취소\]/.test(m.subject)).length, 1, '직전 취소 메일');
-  eq(w.ss.getSheets().length, nSheets + 1, '다시 동기화해도 백업을 또 만들지 않음');
-
-  // 관리자가 열 순서를 바꿈(예약자 ↔ 장비) → 되돌리지 않고, 기록은 열 제목을 보고 씀
+  // 관리자가 열 순서를 바꿈(예약자 ↔ 장비) → 되돌리지 않고, 기록은 열 제목을 보고 읽고 씀
   s.cells.forEach(row => { const x = row[1]; row[1] = row[2]; row[2] = x; });
+  at(w, '2026-10-15T09:10'); w.calendar.remove(CAL.SPUT, ids.d);
+  const e = syncOk(w, '2026-10-15T09:15');
   at(w, '2026-10-15T10:00'); ids.f = ev(w, CAL.TE1, 'UserH(Ag)', '2026-10-16T09:00', '2026-10-16T12:00');
   syncOk(w, '2026-10-15T10:05');
   eq(s.cells[0].slice(0, 3), ['등록시각', '장비', '예약자'], '관리자가 바꾼 순서 유지');
-  eq([lastRow(w, ids.f)['예약자'], lastRow(w, ids.f)['장비']], ['UserH', NAMES.TE1], '바꾼 순서에서도 제 열에');
-  eq([lastRow(w, ids.d)['예약자'], lastRow(w, ids.d)['직전취소']], ['UserG', 'Y'], '앞선 기록도 그대로 읽힘');
-  eq(w.ss.getSheets().length, nSheets + 1, '백업 추가 없음');
+  eq([lastRow(w, ids.f)['예약자'], lastRow(w, ids.f)['장비']], ['UserH', NAMES.TE1], '바꾼 순서에서도 새 기록이 제 열에');
+  eq([lastRow(w, ids.d)['예약자'], lastRow(w, ids.d)['상태'], lastRow(w, ids.d)['직전취소']], ['UserG', '취소', 'Y'], '앞선 기록의 고침도 제 열에');
+  eq(e.mails.filter(isCan).length, 1, '직전 취소 메일');
 });
 
 // ================================================================== 40
@@ -1218,7 +1149,7 @@ const redRows = sh => {
   for (let row = g.row; row < g.row + g.nr && row <= sh.getLastRow(); row++) if ((sh.cells[row - 1] || [])[col - 1] === 'Y') out.push(row);
   return out;
 };
-scenario('46', '직전 취소 행은 빨간색(조건부 서식): 정렬·새 행·열 정리 뒤에도, 다시 설치해도 규칙 하나, 관리자 규칙은 그대로', () => {
+scenario('46', '직전 취소 행은 빨간색(조건부 서식): 정렬·새 행에도, 다시 설치해도 규칙 하나, 관리자 규칙은 그대로', () => {
   const ids = {};
   const w = boot();
   const sh = w.sheet('예약기록');
@@ -1244,147 +1175,6 @@ scenario('46', '직전 취소 행은 빨간색(조건부 서식): 정렬·새 �
   sh.cfRules.push({ formula: '=$B2="UserA"', background: '#ffff00', ranges: [], getBooleanCondition: () => ({ getCriteriaType: () => 'CUSTOM_FORMULA', getCriteriaValues: () => ['=$B2="UserA"'] }) });
   runOk(w.run('setup'));
   eq([sh.cfRules.filter(r => /^=\$[A-Z]+2="Y"$/.test(r.formula)).length, sh.cfRules.some(r => r.formula === '=$B2="UserA"')], [1, true], '규칙 하나, 관리자 규칙 유지');
-  // 예전 설치(열은 정리됐지만 빨간색 규칙이 없음) → 다음 동기화에서 규칙을 더함
-  sh.cfRules = [];
-  w.props.set('columnsVersion', '1');
-  syncOk(w, '2026-10-13T10:10');
-  eq([(lateRule(sh) || {}).formula, redRows(sh)], ['=$I2="Y"', [lastRow(w, ids.a)._row]], '다음 동기화에서 빨간색 규칙 추가');
-});
-
-// ================================================================== 47
-scenario('47', '예전 코드가 남긴 사람 아닌 이름(점검 제목·사용 뒤 메모 제목)을 「사용자」 시트에서 지우고, 메모 양도 기록은 원래 예약자로', () => {
-  const ids = {};
-  const w = boot();
-  syncOk(w, '2026-10-12T09:00:20');
-  at(w, '2026-10-12T10:00'); ids.fix = ev(w, CAL.TE1, '[Fix] Evaporator', '2026-10-12T11:00', '2026-10-13T13:00');
-  ids.j = ev(w, CAL.SPUT, 'UserF(Ag)', '2026-10-13T09:00', '2026-10-13T12:00');
-  syncOk(w, '2026-10-12T10:05');
-  // 예전 코드처럼 만들어 둔다: 사용 시작 뒤 제목 변경을 양도로 적음(점검 → Evaporator-Completed, UserF → UserF-done)
-  const sh = w.sheet('예약기록');
-  const hdr = sh.cells[0];
-  const col = h => hdr.indexOf(h) + 1;
-  const d = s => new Date(kst(s));
-  const oldTransfer = (id, to, when) => {
-    const a = lastRow(w, id);
-    sh.getRange(a._row, col('상태')).setValue('양도');
-    sh.getRange(a._row, col('취소시각')).setValue(d(when));
-    sh.getRange(a._row, col('비고')).setValue('양도 → ' + to);
-    const o = {
-      등록시각: d('2026-10-12T10:00'), 예약자: to, 장비: a['장비'], 시작: new Date(a['시작']), 종료: new Date(a['종료']),
-      등록구분: '추가예약', 상태: '예약', 직전취소기준: d('2026-10-12T09:00'), 제목: to, 비고: '양도 ← ' + a['예약자'] + ' 10/12(월) 12:00',
-      캘린더ID: a['캘린더ID'], 일정ID: a['일정ID']
-    };
-    sh.appendRow(hdr.map(h => (o[h] === undefined ? '' : o[h])));
-  };
-  oldTransfer(ids.fix, 'Evaporator-Completed', '2026-10-12T12:00');
-  oldTransfer(ids.j, 'UserF-done', '2026-10-13T10:00');
-  w.calendar.patch(CAL.TE1, ids.fix, { summary: 'Evaporator-Completed' });
-  const us = w.sheet('사용자');
-  ['Evaporator', 'Evaporator-Completed', 'UserF-done', 'UserL'].forEach(n => us.appendRow([n, '', '']));
-  us.appendRow(['Evaporator-Old', '', 'lab@example.com']); // 이메일을 적은 행은 그대로
-  w.configOverrides.LOG_PERSONAL_DETAILS = true; // 합성 예약자 정리 상세를 명시적으로 확인한다.
-  w.props.set('kindsVersion', '7');
-  const e = syncOk(w, '2026-10-13T10:30');
-  const names = w.table('사용자').map(r => r['대표 이름']);
-  eq(['Evaporator', 'Evaporator-Completed', 'UserF-done'].filter(n => names.indexOf(n) >= 0), [], '사람 아닌 이름은 지움');
-  eq(['UserF', 'UserL', 'Evaporator-Old'].filter(n => names.indexOf(n) >= 0), ['UserF', 'UserL', 'Evaporator-Old'], '실제 예약자·관리자가 적은 이름·이메일 있는 행은 남김');
-  has(e.logs.join('\n'), 'Evaporator, Evaporator-Completed, UserF-done', '명시적으로 켠 상세 로그');
-  eq(w.rowsOf(ids.fix).map(r => [r['예약자'], r['등록구분'], r['상태']]), [['점검', '점검', '양도'], ['점검', '점검', '예약']], '점검 메모 → 점검으로');
-  eq(w.rowsOf(ids.j).map(r => [r['예약자'], r['상태']]), [['UserF', '양도'], ['UserF', '예약']], 'UserF 메모 → UserF로');
-  // 이행률·브리핑에 메모 이름이 나오지 않음
-  at(w, '2026-10-14T10:00'); w.calendar.remove(CAL.TE1, ids.fix);
-  syncOk(w, '2026-10-14T10:05');
-  const b = syncOk(w, '2026-10-19T09:00:20').mails.find(isBrief) || {};
-  hasNot(b.body, 'Evaporator', '브리핑에 Evaporator 없음');
-  eq(w.table('주간보고').some(r => /Evaporator|점검|UserF-done/.test(r['예약자'])), false, '주간보고에 없음');
-  // 다시 동기화해도 같은 정리를 되풀이하지 않음
-  us.appendRow(['Evaporator', '', '']);
-  syncOk(w, '2026-10-19T09:10');
-  eq(w.table('사용자').some(r => r['대표 이름'] === 'Evaporator'), true, '한 번만 정리(그 뒤 관리자가 적은 이름은 둠)');
-});
-
-// ================================================================== 48
-// 실제로 있었던 예전 시트: 1행 등록시각(H1) 제목 칸이 비어 있음
-const USER_OLD_HDR = ['장비', '캘린더ID', '일정ID', '예약자', '제목', '시작', '종료', '', '등록구분', '상태', '취소시각', '직전취소',
-  '늦은취소기준', '위반', '만든계정', '비고', '순위시각', '마감시작', '마감종료', '판정사유'];
-const OLD_TEXT_HDR = ['장비', '캘린더ID', '일정ID', '예약자', '제목', '등록구분', '상태', '직전취소', '위반', '만든계정', '비고', '판정사유'];
-/** 지금 시트 내용을 예전 열 순서(H1 빈 칸)로 바꾼 행들 */
-const toUserOldLayout = sh => {
-  const hdr = sh.cells[0].slice();
-  const idx = h => hdr.indexOf(h === '' ? '등록시각' : h === '늦은취소기준' ? '직전취소기준' : h === '판정사유' ? '제외사유' : h);
-  return sh.cells.map((row, r) => USER_OLD_HDR.map(h => (r === 0 ? h : h === '순위시각' ? '' : idx(h) >= 0 && idx(h) < row.length ? row[idx(h)] : '')));
-};
-scenario('48', '등록시각 제목 칸(H1)이 빈 예전 시트: 옮길 때 자리로 알아보고, 이미 비운 채 옮긴 시트는 백업에서 되살림(그사이 판정도 다시)', () => {
-  // --- A: 아직 옮기기 전(빈 H1) → 옮기면서 등록시각을 그대로
-  {
-    const ids = {};
-    const w = boot();
-    syncOk(w, '2026-10-12T09:00:20');
-    at(w, '2026-10-12T10:00'); ids.a = ev(w, CAL.AFM, 'UserA (BCP)', '2026-10-13T09:00', '2026-10-13T12:00');
-    at(w, '2026-10-12T10:07'); ids.b = ev(w, CAL.SPUT, 'UserD', '2026-10-14T09:00', '2026-10-14T12:00');
-    syncOk(w, '2026-10-12T10:10');
-    const before = w.rows().map(r => [r['일정ID'], r['등록시각']]);
-    const s = w.sheet('예약기록');
-    s.cells = toUserOldLayout(s);
-    s.textCols = new Set(OLD_TEXT_HDR.map(h => USER_OLD_HDR.indexOf(h) + 1));
-    w.props.delete('columnsVersion');
-    syncOk(w, '2026-10-12T10:15');
-    eq(s.cells[0][0], '등록시각', '새 A열 제목');
-    eq(w.rows().map(r => [r['일정ID'], r['등록시각']]), before, '빈 제목 칸 자리를 등록시각으로 알아보고 값을 옮김');
-    // 옮긴 뒤 A1을 실수로 지워도 다음 동기화에서 제목을 채우고 기록은 제자리에
-    s.getRange(1, 1).setValue('');
-    at(w, '2026-10-12T11:00'); ids.c = ev(w, CAL.TE1, 'UserF(Ag)', '2026-10-15T09:00', '2026-10-15T12:00');
-    syncOk(w, '2026-10-12T11:05');
-    eq([s.cells[0][0], lastRow(w, ids.c)['등록시각'], lastRow(w, ids.c)['예약자']], ['등록시각', kst('2026-10-12T11:00'), 'UserF'], '지운 제목 칸을 채움');
-  }
-
-  // --- B: 1·2판이 등록시각을 비운 채 옮긴 시트(지금 상황) → 「예약기록_백업」에서 되살림
-  const ids = {};
-  const w = boot();
-  syncOk(w, '2026-10-12T09:00:20');
-  at(w, '2026-10-12T10:00'); ids.o = ev(w, CAL.TE1, 'UserF(Ag)', '2026-10-14T09:00', '2026-10-14T12:00');
-  at(w, '2026-10-12T10:10'); ids.r = ev(w, CAL.TE1, 'UserD', '2026-10-14T10:00', '2026-10-14T13:00'); // UserF와 겹침(후순위)
-  at(w, '2026-10-12T10:20'); ids.t = ev(w, CAL.AFM, 'UserG(AFM)', '2026-10-15T09:00', '2026-10-15T12:00');
-  at(w, '2026-10-12T10:30'); ids.a = ev(w, CAL.SPUT, 'UserH', '2026-10-16T09:00', '2026-10-16T12:00');
-  syncOk(w, '2026-10-12T10:35');
-  const created = id => lastRow(w, id)['등록시각'];
-  const want = { o: created(ids.o), r: created(ids.r), t: created(ids.t), a: created(ids.a) };
-  const s = w.sheet('예약기록');
-  // 1·2판이 한 일: 원래 시트(빈 H1)를 백업으로 복사하고, 새 시트의 등록시각은 비움
-  const bk = w.ss.insertSheet('예약기록_백업');
-  bk.cells = toUserOldLayout(s);
-  bk.textCols = new Set(OLD_TEXT_HDR.map(h => USER_OLD_HDR.indexOf(h) + 1));
-  s.cells.forEach((row, i) => { if (i > 0) row[0] = ''; });
-  w.props.set('columnsVersion', '2');
-  // 등록시각 없이 돌던 동안 생긴 일(그때 코드가 적은 그대로)
-  const col = h => s.cells[0].indexOf(h) + 1;
-  const setCell = (row, h, v) => s.getRange(row, col(h)).setValue(v);
-  const d = x => new Date(kst(x));
-  //  r 취소: 등록시각이 없어 순위를 못 가려 직전 취소로 적힘(원래는 UserF에게 양보)
-  at(w, '2026-10-14T09:30'); w.calendar.remove(CAL.TE1, ids.r);
-  const rr = lastRow(w, ids.r)._row;
-  setCell(rr, '상태', '취소'); setCell(rr, '취소시각', d('2026-10-14T09:30')); setCell(rr, '직전취소', 'Y'); setCell(rr, '제외사유', '');
-  //  t 양도(같은 시간): 새 행도 등록시각 없음
-  at(w, '2026-10-13T10:00'); w.calendar.patch(CAL.AFM, ids.t, { summary: 'UserE(AFM)' });
-  const tr = lastRow(w, ids.t);
-  setCell(tr._row, '상태', '양도'); setCell(tr._row, '취소시각', d('2026-10-13T10:00')); setCell(tr._row, '비고', '양도 → UserE');
-  const hdr = s.cells[0];
-  const nr = { 예약자: 'UserE', 장비: tr['장비'], 시작: new Date(tr['시작']), 종료: new Date(tr['종료']), 등록구분: tr['등록구분'], 상태: '예약',
-    직전취소기준: new Date(tr['직전취소기준']), 제목: 'UserE(AFM)', 비고: '양도 ← UserG 10/13(화) 10:00', 캘린더ID: tr['캘린더ID'], 일정ID: tr['일정ID'] };
-  s.appendRow(hdr.map(h => (nr[h] === undefined ? '' : nr[h])));
-  //  a 시간 조정(09:00 → 10:00): 백업과 시작이 달라짐
-  at(w, '2026-10-13T11:00'); w.calendar.patch(CAL.SPUT, ids.a, { start: '2026-10-16T10:00' });
-  setCell(lastRow(w, ids.a)._row, '시작', d('2026-10-16T10:00'));
-
-  const e = syncOk(w, '2026-10-14T10:00');
-  eq([created(ids.o), created(ids.r), created(ids.a)], [want.o, want.r, want.a], '등록시각 되살림(시간 조정한 예약 포함)');
-  eq(w.rowsOf(ids.t).map(r => [r['예약자'], r['상태'], r['등록시각']]), [['UserG', '양도', want.t], ['UserE', '예약', want.t]], '양도 두 행 모두');
-  eq([lastRow(w, ids.r)['직전취소'], lastRow(w, ids.r)['제외사유']], ['N', '양보'], '그사이 닫힌 예약은 다시 판정(앞 순위에 양보)');
-  has(e.logs.join('\n'), '등록시각 5건을 되살렸습니다(그사이 닫힌 1건은 직전 취소를 다시 판정)', '로그');
-  const ts = w.table('예약기록').map(r => r['등록시각']);
-  eq([ts.every(v => typeof v === 'number'), ts.every((v, i) => i === 0 || ts[i - 1] >= v)], [true, true], '빈 칸 없이 최신순 정렬');
-  eq(w.props.get('columnsVersion'), '4', '한 번만');
-  eq(e.mails.filter(isCan).length, 0, '되살리면서 메일은 보내지 않음');
 });
 
 // ================================================================== 49
@@ -1429,46 +1219,34 @@ scenario('49', '브리핑 지난주 직전 취소: 사람마다 지난주 직전
 });
 
 // ================================================================== 50
-scenario('50', '같은 일정의 「예약」 행이 둘 남은 기록(예전 판): 브리핑 중복 예약에 나오지 않고, 동기화 때 하나를 「중복」으로 정리', () => {
+scenario('50', '예전 판이 남긴 기록: 같은 일정의 「예약」 행이 둘이어도 브리핑에 한 번, 「중복」 상태 행은 집계에서 뺌', () => {
   const ids = {};
   const w = boot();
   syncOk(w, '2026-10-12T09:00:20');
   at(w, '2026-10-12T10:00'); ids.g = ev(w, CAL.AFM, 'UserA (BCP)', '2026-10-13T15:00', '2026-10-13T18:00');
-  ids.j = ev(w, CAL.TE1, 'UserF(Ag)', '2026-10-14T09:00', '2026-10-14T12:00');
   syncOk(w, '2026-10-12T10:05');
-  // 예전 판이 남긴 모양: 같은 일정의 「예약」 행이 하나 더(비고만 다름)
   const s = w.sheet('예약기록');
   const g = lastRow(w, ids.g);
   const copy = s.cells[g._row - 1].map(v => (v && v.t === 'd' ? new Date(v.ms) : v));
   copy[s.cells[0].indexOf('비고')] = '사용 중 시간 수정';
   s.appendRow(copy);
   eq(w.rowsOf(ids.g).filter(r => r['상태'] === '예약').length, 2, '준비: 같은 일정 「예약」 두 행');
-  // 동기화 없이 미리보기만 해도 중복 예약으로 나오지 않음(이번 주 브리핑을 아직 안 보낸 것으로 두고 이번 주를 미리 봄)
+  // 이번 주 브리핑을 아직 안 보낸 것으로 두고 이번 주를 미리 봄
   const sent = w.props.get('briefingWeek');
   w.props.set('briefingWeek', String(kst('2026-10-05T09:00')));
   at(w, '2026-10-12T10:10'); const p = w.run('previewMondayMails'); runOk(p);
   w.props.set('briefingWeek', sent);
-  hasNot(p.mails[0] && p.mails[0].body, '■ 중복 예약', '미리보기: 같은 일정은 중복 예약 아님');
-  has(p.mails[0] && p.mails[0].body, '▶ [LAB-A] Atomic Force Microscope (1건)', '미리보기: 장비별 건수도 한 번');
-  // 이 판으로 올린 첫 동기화(정리 단계 9)에서 하나를 「중복」으로
-  w.props.set('kindsVersion', '8');
-  const e = syncOk(w, '2026-10-12T10:15');
-  eq(w.rowsOf(ids.g).map(r => r['상태']).sort(), ['예약', '중복'], '하나만 남기고 「중복」');
-  has(e.logs.join('\n'), '「중복」으로 정리했습니다', '로그');
-  eq(w.rowsOf(ids.j).length, 1, '다른 기록은 그대로');
-  // 그 뒤에도 캘린더 변경을 처리하는 동기화는 먼저 정리한다
-  const jr = lastRow(w, ids.j);
-  s.appendRow(s.cells[jr._row - 1].map(v => (v && v.t === 'd' ? new Date(v.ms) : v)));
-  at(w, '2026-10-12T10:20'); ev(w, CAL.SPUT, 'UserD', '2026-10-15T09:00', '2026-10-15T12:00');
-  syncOk(w, '2026-10-12T10:25');
-  eq(w.rowsOf(ids.j).map(r => r['상태']).sort(), ['예약', '중복'], '변경을 처리하는 동기화에서도 정리');
-  // 남은 예약을 사용 시작 뒤 지우면 직전 취소 하나, 이행률·브리핑에도 한 번만
+  hasNot(p.mails[0] && p.mails[0].body, '■ 중복 예약', '같은 일정은 중복 예약 아님');
+  has(p.mails[0] && p.mails[0].body, '▶ ' + NAMES.AFM + ' (1건)', '장비별 건수도 한 번');
+  // 운영 시트처럼 하나는 「중복」 상태 → 남은 예약을 사용 시작 뒤 지우면 직전 취소 하나, 집계에 「중복」 행 없음
+  const dupRow = w.rowsOf(ids.g).find(r => r['비고'] === '사용 중 시간 수정')._row;
+  s.getRange(dupRow, s.cells[0].indexOf('상태') + 1).setValue('중복');
   at(w, '2026-10-13T16:00'); w.calendar.remove(CAL.AFM, ids.g);
   const c = syncOk(w, '2026-10-13T16:05');
   eq(w.rowsOf(ids.g).map(r => [r['상태'], r['직전취소']]).sort(), [['중복', ''], ['취소', 'Y']], '직전 취소 한 건');
   eq(c.mails.filter(isCan).length, 1, '[예약취소] 한 통');
   const b = syncOk(w, '2026-10-19T09:00:20').mails.find(isBrief) || {};
-  has(b.body, '  UserA  직전 취소 1건 · 사용 0건   [4주간 직전 취소 1건]', '집계에 중복 행 없음');
+  has(b.body, '  UserA  직전 취소 1건 · 사용 0건   [4주간 직전 취소 1건]', '집계에 「중복」 행 없음');
   has(b.htmlBody, 'max-width:560px', 'PC에서도 폭 제한');
 });
 
@@ -1514,6 +1292,89 @@ scenario('52', '규칙 확인은 사람·날짜마다 한 항목: 그날 예약�
   has(b.htmlBody, '<b>UserA</b>&nbsp; 10/21(수) · 2건</td>', 'HTML 첫 줄');
   has(b.htmlBody, '10:00–13:00 · [LAB-B] Thermal evaporator</td><td align="right" valign="top" style="padding:0 0 0 12px;white-space:nowrap;color:#b3261e;font-size:13px">중복 2순위</td>',
     'HTML: 순위는 그 줄 오른쪽 끝');
+});
+
+// ================================================================== 53
+scenario('53', '「주간보고」 시트를 지워도 월요일 브리핑은 나감(주간 기록만 건너뜀)', () => {
+  const w = boot();
+  syncOk(w, '2026-10-12T09:00:20');
+  at(w, '2026-10-12T10:00'); const id = ev(w, CAL.AFM, 'UserA (BCP)', '2026-10-13T09:00', '2026-10-13T12:00');
+  syncOk(w, '2026-10-12T10:05');
+  at(w, '2026-10-13T09:30'); w.calendar.remove(CAL.AFM, id);
+  syncOk(w, '2026-10-13T09:35');
+  w.ss.deleteSheet(w.sheet('주간보고'));
+  const e = syncOk(w, '2026-10-19T09:00:20');
+  const b = e.mails.find(isBrief) || {};
+  has(b.body, 'UserA  직전 취소 1건', '브리핑에 지난주 직전 취소');
+  has(e.logs.join('\n'), '시트가 없어 주간 기록을 남기지 않았습니다', '로그');
+});
+
+// ================================================================== 54
+scenario('54', '시트 탭 순서: 예약기록 · 주간보고 · 장비 · 사용자(그 밖의 탭은 뒤), 다시 실행해도 같음', () => {
+  const w = boot();
+  eq(w.ss.getSheets().map(s => s.getName()), ['예약기록', '주간보고', '장비', '사용자'], 'setup 뒤 순서');
+  // 관리자가 순서를 섞고 백업 탭이 있는 상태에서 다시 맞춤
+  w.ss.insertSheet('예약기록_백업');
+  w.ss.sheets.reverse();
+  runOk(w.run('arrangeSheetTabs'));
+  eq(w.ss.getSheets().map(s => s.getName()), ['예약기록', '주간보고', '장비', '사용자', '예약기록_백업'], '다시 맞춤(백업은 뒤)');
+  runOk(w.run('setup'));
+  eq(w.ss.getSheets().map(s => s.getName()), ['예약기록', '주간보고', '장비', '사용자', '예약기록_백업'], 'setup 다시 실행해도 같음');
+  at(w, '2026-10-12T10:00'); ev(w, CAL.AFM, 'UserA (BCP)', '2026-10-13T09:00', '2026-10-13T12:00');
+  syncOk(w, '2026-10-12T10:05');
+  eq(w.rows().length, 1, '순서를 바꿔도 기록은 그대로');
+});
+
+// ================================================================== 56
+scenario('56', '그룹 메일 맨 아래 안내(GROUP_FOOTER = notice): 시험용 그룹 견본, 기본은 그대로, 켜면 \'--\' 아래 작은 안내 + 그룹스 바닥글 숨김', () => {
+  const w = boot();
+  syncOk(w, '2026-10-12T09:00:20');
+  const HIDE = '<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#ffffff;mso-hide:all">';
+  const ROW = '<tr><td style="padding:0;font-family:Arial,sans-serif;font-size:11px;line-height:1.5;color:#80868b">';
+  let e = w.run('testFooterMail'); runOk(e);
+  eq(e.mails.length, 0, '시험 주소가 없으면 보내지 않음');
+  has(e.logs.join('\n'), 'TEST_GROUP_EMAIL', '설정 안내');
+  w.configOverrides = { TEST_GROUP_EMAIL: 'footer-test@example.com' };
+  e = w.run('testFooterMail'); runOk(e);
+  eq(e.mails.map(m => m.to), ['footer-test@example.com'], '시험용 그룹에만 한 통');
+  const t = e.mails[0] || {};
+  check(/^\[시험\] \[장비예약\]/.test(t.subject || '') && String(t.htmlBody).slice(-HIDE.length) === HIDE &&
+    String(t.htmlBody).indexOf(ROW + '--</td></tr>' + ROW + 'You received this equipment booking notice because you are a member of the ') > 0 &&
+    String(t.htmlBody).indexOf(ROW + 'To unsubscribe from this group, contact the group manager.</td></tr>') > 0,
+    '견본: \'--\' 아래 작은 글씨를 한 줄씩 표 칸에 + 그룹스 바닥글 숨김 상자', String(t.htmlBody).slice(-900));
+  check(/^<!DOCTYPE html><html><head>.*<meta name="viewport" content="width=device-width, initial-scale=1"><\/head><body /.test(t.htmlBody || ''), '휴대폰용 머리(viewport), body·html은 열어 둠', String(t.htmlBody).slice(0, 300));
+  eq(/<\/body>|<\/html>/.test(t.htmlBody || ''), false, '그룹스 바닥글이 숨김 상자 안에 붙도록 닫지 않음');
+  w.configOverrides = {};
+  // 실제 그룹 메일: 기본(공개 설정 '')은 그대로, GROUP_FOOTER = notice면 [예약취소]·브리핑 끝에 안내 + 숨김 상자
+  at(w, '2026-10-12T10:00'); const id = ev(w, CAL.AFM, 'UserA (BCP)', '2026-10-13T09:00', '2026-10-13T12:00');
+  syncOk(w, '2026-10-12T10:05');
+  at(w, '2026-10-13T09:30'); w.calendar.remove(CAL.AFM, id);
+  let c = syncOk(w, '2026-10-13T09:35').mails.find(isCan) || {};
+  eq(String(c.htmlBody).indexOf(HIDE) < 0, true, '기본은 그룹스 바닥글 그대로');
+  w.configOverrides = { GROUP_FOOTER: 'notice' };
+  at(w, '2026-10-13T10:00'); const id2 = ev(w, CAL.SPUT, 'UserI', '2026-10-13T13:00', '2026-10-13T16:00');
+  syncOk(w, '2026-10-13T10:05');
+  at(w, '2026-10-13T13:30'); w.calendar.remove(CAL.SPUT, id2);
+  c = syncOk(w, '2026-10-13T13:35').mails.find(isCan) || {};
+  eq(String(c.htmlBody).slice(-HIDE.length), HIDE, 'notice면 [예약취소] 끝에 안내 + 숨김 상자');
+  const b = syncOk(w, '2026-10-19T09:00:20').mails.find(isBrief) || {};
+  eq(String(b.htmlBody).slice(-HIDE.length), HIDE, '브리핑 끝에도');
+  has(b.htmlBody, 'letter-spacing:-0.2px">10/19(월) 09:00~10/26(월) 09:00</div>', '본문 첫 줄은 기간만 촘촘하게(휴대폰 한 줄)');
+  eq(b.subject, '[장비예약] 10/19(월)~10/26(월) 예약 내역', '메일 제목은 날짜만');
+  // googlegroups 주소면 수신 거부 주소·그룹 페이지 링크, 그룹 이름
+  const fakeGroup = ['example-lab-team', 'googlegroups.com'].join('@'); // 가상의 그룹 주소(googlegroups 형식 확인용)
+  const notice = w.eval('groupFooterHtml_(' + JSON.stringify(fakeGroup) + ')');
+  check(notice.indexOf('To unsubscribe from this group, send an email to <a href="mailto:' + encodeURIComponent(fakeGroup.split('@')[0] + '+unsubscribe') + '@' + fakeGroup.split('@')[1] + '"') > 0 &&
+    notice.indexOf('Past messages are available on <a href="https://groups.google.com/g/example-lab-team"') > 0 &&
+    notice.indexOf('You received this equipment booking notice because you are a member of the "Example Equipment Group" group.') > 0,
+    '안내(영어 기본): 수신 거부 주소·지난 메일 링크·그룹 이름', notice);
+  w.configOverrides = { FOOTER_LANG: 'ko' };
+  syncOk(w, '2026-10-19T09:30');
+  const ko = w.eval('groupFooterHtml_(' + JSON.stringify(fakeGroup) + ')');
+  check(ko.indexOf('이 메일은 「Example Equipment Group」 그룹 회원에게 보내는 장비 예약 알림입니다.') > 0 &&
+    ko.indexOf('이 그룹을 수신 거부하려면 <a href="mailto:') > 0 && ko.indexOf('>Google 그룹</a>에서 확인할 수 있습니다.') > 0,
+    'FOOTER_LANG = ko면 한국어 안내', ko);
+  w.configOverrides = {};
 });
 
 // ------------------------------------------------------------------ 요약

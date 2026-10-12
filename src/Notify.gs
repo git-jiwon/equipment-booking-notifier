@@ -1,5 +1,5 @@
 /**
- * 알림: 이메일(MailApp, 무료). 그룹 주소 한 통 = 받는 사람 1명으로 센다.
+ * 알림: 이메일(MailApp). 발송·수신자 할당량은 계정과 그룹 설정에 따라 확인한다.
  * - 그룹: 「직전 취소」만([예약취소] 메일). 그 주 슬롯이 직전 취소로 비었을 때, 다른 사람이 바로 예약해 쓸 수 있도록 알린다.
  *         (정상 취소·변경·중복 예약 등은 메일 없이 기록만. 월요일 브리핑에서 한 번에 본다)
  * - 개인: 기간전예약(다음 주 이후를 미리 잡음)을 예약자에게.
@@ -210,35 +210,20 @@ function sendEarlyMails_(entries) {
   return sent;
 }
 
-/** 기록 시트 링크 줄(HTML에서는 「예약기록 시트 열기」 링크) */
-function sheetLink_() {
-  return '기록 보기: ' + SpreadsheetApp.getActive().getUrl();
-}
-
 /**
  * 일반 텍스트 본문을 HTML로도 보낸다(일반 텍스트는 받는 쪽에서 긴 줄을 아무 데서나 자름).
- * ■·▶ 줄은 굵게, 앞 공백은 들여쓰기, '—' 줄 아래는 작은 회색 글씨, 기록 주소는 링크.
+ * ■·▶ 줄은 굵게, 앞 공백은 들여쓰기.
  */
-const FOOTER_MARK = '—';
 function toHtml_(text) {
   const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const fmtLine = line => {
-    const link = /^기록 보기: (https?:\/\/\S+)$/.exec(line);
-    if (link) return '<a href="' + esc(link[1]) + '">예약기록 시트 열기</a>';
-    let h = esc(line).replace(/^ +/, m => '&nbsp;'.repeat(m.length)).replace(/ {2,}/g, m => '&nbsp;'.repeat(m.length));
-    if (/^\s*(■|▶)/.test(line)) h = '<b>' + h + '</b>';
-    return h;
+    const h = esc(line).replace(/^ +/, m => '&nbsp;'.repeat(m.length)).replace(/ {2,}/g, m => '&nbsp;'.repeat(m.length));
+    return /^\s*(■|▶)/.test(line) ? '<b>' + h + '</b>' : h;
   };
   const lines = String(text).split('\n');
-  const cut = lines.lastIndexOf(FOOTER_MARK);
-  const main = cut >= 0 ? lines.slice(0, cut) : lines;
-  const foot = cut >= 0 ? lines.slice(cut + 1) : [];
-  while (main.length && !main[main.length - 1].trim()) main.pop();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
   return '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#222;max-width:' +
-    (CONFIG.MAIL_MAX_WIDTH || 560) + 'px">' +
-    main.map(fmtLine).join('<br>') +
-    (foot.length ? '<div style="margin-top:18px;padding-top:10px;border-top:1px solid #ddd;font-size:12px;line-height:1.5;color:#666">' +
-      foot.map(fmtLine).join('<br>') + '</div>' : '') + '</div>';
+    (CONFIG.MAIL_MAX_WIDTH || 560) + 'px">' + lines.map(fmtLine).join('<br>') + '</div>';
 }
 
 /**
@@ -250,7 +235,50 @@ function sendGroupMail_(subject, body, extraCc, html) {
   const to = CONFIG.GROUP_EMAIL || admins.join(',');
   const cc = Array.from(new Set((CONFIG.GROUP_EMAIL && CONFIG.CC_ADMIN ? admins : []).concat(extraCc || [])))
     .filter(e => e && e !== to).join(',');
+  if (CONFIG.GROUP_EMAIL && String(CONFIG.GROUP_FOOTER || '').trim().toLowerCase() === 'notice') {
+    html = (html || toHtml_(body)) + groupFooterHtml_(CONFIG.GROUP_EMAIL);
+  }
   return sendMail_({ to, cc, subject, body, html });
+}
+
+/**
+ * HTML 메일 머리: 휴대폰 화면 폭에 맞춘 메일이라고 알린다(viewport). body·html은 닫지 않는다(그룹스 바닥글이 본문 뒤
+ * 숨김 상자 안에 붙도록).
+ */
+const MOBILE_HEAD_HTML_ = '<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8">' +
+  '<meta name="viewport" content="width=device-width, initial-scale=1"></head>' +
+  '<body style="-webkit-text-size-adjust:100%;text-size-adjust:100%">';
+const withMobileHead_ = html => (/^\s*(<!DOCTYPE|<html)/i.test(html) ? html : MOBILE_HEAD_HTML_ + html);
+
+/**
+ * 그룹 메일 맨 아래 안내(CONFIG.GROUP_FOOTER = 'notice'). 그룹 설정의 표준 바닥글 옵션을 먼저 확인한다.
+ * 본문 끝에 '--' 아래 작은 회색 안내(FOOTER_LANG)를 넣고 뒤를 숨김 상자로 열어 두어 추가되는 그룹스 바닥글을 숨기도록 한다.
+ * 이 표시는 그룹스의 HTML 처리와 메일 앱에 따라 달라질 수 있다. 안내는 한 줄씩 표 칸에 나눠 휴대폰의 자동 글자 확대를
+ * 줄이도록 한다. 실제 그룹을 거쳐 받은 시험 메일에서 확인한다. group: 그룹 주소
+ */
+function groupFooterHtml_(group) {
+  const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const addr = String(group || '').trim();
+  const m = isSingleEmail_(addr) ? /^([^@\s]+)@googlegroups\.com$/i.exec(addr) : null;
+  const unsub = m ? m[1] + '+unsubscribe' + addr.slice(m[1].length) : ''; // 그룹스 수신 거부 주소(이름+unsubscribe@그룹 도메인)
+  const unsubHref = m ? 'mailto:' + encodeURIComponent(m[1] + '+unsubscribe') + addr.slice(m[1].length) : '';
+  const a = (href, text) => '<a href="' + esc(href) + '" style="color:#1a73e8">' + esc(text) + '</a>';
+  const name = String(CONFIG.GROUP_NAME || '').trim();
+  const past = m ? a('https://groups.google.com/g/' + encodeURIComponent(m[1]), 'Google Groups') : '';
+  const lines = String(CONFIG.FOOTER_LANG || 'en').toLowerCase() === 'ko' ? [
+    '이 메일은 ' + (name ? '「' + esc(name) + '」 ' : '') + '그룹 회원에게 보내는 장비 예약 알림입니다.',
+    m ? '이 그룹을 수신 거부하려면 ' + a(unsubHref, unsub) + ' 주소로 이메일을 보내 주세요.' :
+      '이 그룹의 수신 거부는 그룹 관리자에게 문의해 주세요.'
+  ].concat(m ? ['지난 메일은 ' + past.replace('>Google Groups<', '>Google 그룹<') + '에서 확인할 수 있습니다.'] : []) : [
+    'You received this equipment booking notice because you are a member of the ' +
+      (name ? '"' + esc(name) + '" group.' : 'group.'),
+    m ? 'To unsubscribe from this group, send an email to ' + a(unsubHref, unsub) + '.' :
+      'To unsubscribe from this group, contact the group manager.'
+  ].concat(m ? ['Past messages are available on ' + past + '.'] : []);
+  const row = t => '<tr><td style="padding:0;font-family:Arial,sans-serif;font-size:11px;line-height:1.5;color:#80868b">' + t + '</td></tr>';
+  return '<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:20px;max-width:' +
+    (CONFIG.MAIL_MAX_WIDTH || 560) + 'px">' + row('--') + lines.map(row).join('') + '</table>' +
+    '<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#ffffff;mso-hide:all">';
 }
 
 function sendAdminMail_(subject, body, html) {
@@ -268,7 +296,7 @@ function sendMail_(m) {
     return false;
   }
   try {
-    const msg = { to: m.to, subject: m.subject, body: m.body, htmlBody: m.html || toHtml_(m.body), name: CONFIG.SENDER_NAME };
+    const msg = { to: m.to, subject: m.subject, body: m.body, htmlBody: withMobileHead_(m.html || toHtml_(m.body)), name: CONFIG.SENDER_NAME };
     if (m.cc) msg.cc = m.cc;
     if (CONFIG.ADMIN_EMAILS[0]) msg.replyTo = CONFIG.ADMIN_EMAILS[0];
     MailApp.sendEmail(msg);

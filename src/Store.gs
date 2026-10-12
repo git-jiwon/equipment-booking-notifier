@@ -21,8 +21,6 @@ const RES_HEADERS = [
   '마감시작', '마감종료' // 월 09:00 뒤 시간을 바꾼 정기예약: 기간이 끝날 때의 시간(하루 제한 판정)
 ];
 const RES_HIDDEN_COLS = ['캘린더ID', '일정ID', '마감시작', '마감종료'];
-/** 예전 열 제목 → 지금 제목(null = 없앤 열) */
-const RES_OLD_HEADERS = { '늦은취소': '직전취소', '늦은취소기준': '직전취소기준', '판정사유': '제외사유', '순위시각': null };
 const COL = {};
 RES_HEADERS.forEach((h, i) => { COL[h] = i; });
 // 글자로 저장할 열(시트가 숫자·날짜로 바꾸지 않도록 표시 형식 '@')
@@ -33,37 +31,6 @@ const RES_WIDTHS = {
   직전취소: 65, 직전취소기준: 140, 제외사유: 70, 위반: 260, 제목: 200, 비고: 220, 만든계정: 180,
   캘린더ID: 200, 일정ID: 160, 마감시작: 140, 마감종료: 140
 };
-/** 예전 제목을 지금 제목으로(모르는 제목은 그대로, 없앤 열은 null). 앞뒤 괄호·공백은 무시 */
-const resHeaderName_ = h => {
-  const s = String(h).trim().replace(/^[(（\[]\s*(.*?)\s*[)）\]]$/, '$1');
-  return Object.prototype.hasOwnProperty.call(RES_OLD_HEADERS, s) ? RES_OLD_HEADERS[s] : s;
-};
-/** 지금까지 쓴 열 순서(예전 판, 지금 판) */
-const RES_LAYOUTS = [
-  ['장비', '캘린더ID', '일정ID', '예약자', '제목', '시작', '종료', '등록시각', '등록구분', '상태', '취소시각', '직전취소',
-    '늦은취소기준', '위반', '만든계정', '비고', '순위시각', '마감시작', '마감종료', '판정사유'],
-  RES_HEADERS
-];
-/**
- * 1행 제목 → 열마다 지금 이름(없앤 열·모르는 열·빈 칸은 null). 제목 칸이 비어 있어도(실수로 지움) 나머지 제목이
- * 모두 어느 판의 열 순서와 같은 자리에 있으면 빈 칸을 그 판의 이름으로 본다.
- */
-function resColumnNames_(hdr) {
-  const blank = hdr.map(h => String(h).trim() === '');
-  const names = hdr.map((h, i) => (blank[i] ? null : resHeaderName_(h) || null));
-  if (!blank.some(Boolean)) return names;
-  for (const layout of RES_LAYOUTS) {
-    let same = 0;
-    let diff = 0;
-    hdr.forEach((h, i) => {
-      if (blank[i] || i >= layout.length) return;
-      if (resHeaderName_(h) === resHeaderName_(layout[i])) same++; else diff++;
-    });
-    if (!diff && same >= 5) return names.map((n, i) => (blank[i] && i < layout.length ? resHeaderName_(layout[i]) : n));
-  }
-  return names;
-}
-
 /** 기록을 실행을 넘어 가리키는 열쇠(행 순서가 바뀌어도 그대로) */
 const recordKey = r => r.calendarId + '|' + r.eventId + '|' + r.start;
 
@@ -108,17 +75,13 @@ const Store = (() => {
     return n ? sh.getRange(1, 1, 1, n).getValues()[0].map(h => String(h).trim()) : [];
   }
 
-  /** 1행 제목으로 열 위치를 찾는다(예전 제목도). 시트에 없는 열은 오른쪽 끝에 제목을 더한다 */
+  /** 1행 제목으로 열 위치를 찾는다. 시트에 없는 열은 오른쪽 끝에 제목을 더한다 */
   function columns() {
     if (cols) return cols;
     const sh = sheet(SHEETS.RESERVATIONS);
     const hdr = headerOf(sh);
     const c = {};
-    resColumnNames_(hdr).forEach((name, i) => {
-      if (!name || name in c) return;
-      c[name] = i;
-      if (!hdr[i]) sh.getRange(1, i + 1).setValue(name); // 비어 있던 제목 칸을 채운다
-    });
+    hdr.forEach((name, i) => { if (name && !(name in c)) c[name] = i; });
     const missing = RES_HEADERS.filter(h => !(h in c));
     if (missing.length) {
       sh.getRange(1, hdr.length + 1, 1, missing.length).setValues([missing]);
@@ -198,140 +161,13 @@ const Store = (() => {
     return v.map(safeText_);
   }
 
-  /**
-   * 「예약기록」을 RES_HEADERS 순서로 옮겨 적는다(예전 열 순서·제목인 시트를 한 번). 원래 시트는 먼저
-   * 「예약기록_백업」으로 복사해 둔다. 없앤 열(순위시각)은 백업에만 남고, 스크립트가 모르는 열은 오른쪽 끝에 둔다.
-   * 반환: 옮겨 적었는지(이미 그 순서면 false)
-   */
-  function arrangeColumns() {
-    const ss = SpreadsheetApp.getActive();
-    const sh = sheet(SHEETS.RESERVATIONS);
-    if (pending.length || dirty.size) throw new Error('arrangeColumns: 쓰지 않은 기록이 있습니다');
-    const hdr = headerOf(sh);
-    if (RES_HEADERS.every((h, i) => hdr[i] === h)) return false;
-    const last = Math.max(sh.getLastRow(), 1);
-    const old = hdr.length ? sh.getRange(1, 1, last, hdr.length).getValues() : [[]];
-    if (last > 1) {
-      let name = SHEETS.RESERVATIONS + '_백업';
-      for (let k = 2; ss.getSheetByName(name); k++) name = SHEETS.RESERVATIONS + '_백업' + k;
-      const backup = sh.copyTo(ss).setName(name);
-      protectSheet_(backup);
-    }
-    const names = resColumnNames_(hdr);
-    const src = {};
-    names.forEach((name, i) => { if (name && !(name in src)) src[name] = i; });
-    const extra = [];
-    names.forEach((name, i) => { if (name && RES_HEADERS.indexOf(name) < 0) extra.push(i); });
-    const header = RES_HEADERS.concat(extra.map(i => hdr[i]));
-    const values = [header].concat(old.slice(1).map(v =>
-      RES_HEADERS.map(h => (h in src ? v[src[h]] : '')).concat(extra.map(i => v[i])).map(x => safeText_(x === null || x === undefined ? '' : x))));
-    // 지우기 전에 덮어쓴다(중간에 멈춰도 원래 제목이 남아 다음 실행에서 다시 옮긴다). 남는 오른쪽 열만 비운다
-    sh.showColumns(1, Math.max(hdr.length, header.length));
-    formatRecordSheet_(sh, COL);
-    sh.getRange(1, 1, values.length, header.length).setValues(values);
-    if (hdr.length > header.length) sh.getRange(1, header.length + 1, last, hdr.length - header.length).clearContent();
-    rows = null;
-    byRowNum = null;
-    cols = null;
-    return true;
-  }
-
-  /**
-   * 「예약기록_백업」(열을 옮기기 전 시트)의 행과 지금 기록을 짝짓는다. 백업 뒤 그대로인 행(시작·예약자·상태·
-   * 취소시각이 같음)을 먼저, 다음은 백업 당시 「예약」이던 같은 일정의 행, 일정ID가 바뀐 같은 예약(같은 시간·예약자),
-   * 마지막으로 남은 후보 중 가장 이른 등록시각. 백업 행 순서와 상관없이 같은 결과.
-   * keep(r): 짝지을 기록만(없으면 전부). 반환: null(백업 없음) 또는 { matches: [{ row, was, same, rivals }], maxCreated }
-   *   was: 백업 행(등록시각·상태·구분·직전취소·제외사유·마감), same: 백업 뒤 그대로인 행,
-   *   rivals: 같은 일정·시작·예약자인데 등록시각·상태·구분이 다른 백업 행이 있음(3판이 잘못 짝지었을 수 있음)
-   */
-  function matchBackup(keep) {
-    const ss = SpreadsheetApp.getActive();
-    let maxCreated = 0;
-    let found = 0;
-    const byEvent = new Map(); // 캘린더|일정ID → 백업 행들
-    const bySlot = new Map();  // 캘린더|시작|종료|예약자 → 백업 당시 「예약」 행들(그 뒤 지우고 다시 만들어 일정ID가 바뀐 같은 예약)
-    const push = (m, k, x) => { if (!m.has(k)) m.set(k, []); m.get(k).push(x); };
-    for (const b of ss.getSheets()) {
-      if (b.getName().indexOf(SHEETS.RESERVATIONS + '_백업') !== 0) continue;
-      const values = b.getDataRange().getValues();
-      if (values.length < 2) continue;
-      const at = {};
-      resColumnNames_(values[0].map(h => String(h).trim())).forEach((n, i) => { if (n && !(n in at)) at[n] = i; });
-      if (!['등록시각', '캘린더ID', '일정ID', '시작'].every(h => h in at)) continue;
-      const get = (v, h) => (h in at ? v[at[h]] : '');
-      for (const v of values.slice(1)) {
-        const created = toMs(get(v, '등록시각'));
-        const start = toMs(get(v, '시작'));
-        if (!created || start === null) continue;
-        const cal = String(get(v, '캘린더ID'));
-        const x = { created, start, end: toMs(get(v, '종료')), cancelled: toMs(get(v, '취소시각')),
-          bookerKey: bookerKeyOf(get(v, '예약자')), status: String(get(v, '상태')), kind: String(get(v, '등록구분')),
-          late: get(v, '직전취소') === 'Y', lateReason: String(get(v, '제외사유') || ''),
-          windowStart: toMs(get(v, '마감시작')), windowEnd: toMs(get(v, '마감종료')) };
-        maxCreated = Math.max(maxCreated, created);
-        found++;
-        push(byEvent, cal + '|' + String(get(v, '일정ID')), x);
-        if (x.status === STATUS.ACTIVE) push(bySlot, cal + '|' + x.start + '|' + x.end + '|' + x.bookerKey, x);
-      }
-    }
-    const sec_ = ms => (ms === null ? null : Math.floor(ms / 1000)); // 글자로 적힌 시각은 초까지만
-    // 후보의 등록시각이 하나로 정해질 때만(같은 행이 백업 두 곳에 있어도 같은 값)
-    const one = list => (list.length && list.every(x => x.created === list[0].created) ? list[0] : null);
-    const earliest_ = list => list.reduce((a, b) => (a === null || b.created < a.created ? b : a), null);
-    if (!found) return null;
-    const out = [];
-    for (const r of load()) {
-      if (keep && !keep(r)) continue;
-      const evs = byEvent.get(r.calendarId + '|' + r.eventId) || [];
-      const sameStart = evs.filter(x => x.start === r.start && x.bookerKey === r.bookerKey);
-      const same = one(sameStart.filter(x => x.status === r.status && sec_(x.cancelled) === sec_(r.cancelled)));
-      const was =
-        // 1) 백업 뒤 그대로인 행: 시작·예약자·상태·취소시각이 같은 백업 행
-        same ||
-        // 2) 같은 시작·예약자(백업 뒤 닫힘·양도, 메모 바로잡기): 백업 당시 「예약」이던 행 먼저
-        one(sameStart.filter(x => x.status === STATUS.ACTIVE)) ||
-        // 3) 백업 뒤 시간 조정·양도: 백업 당시 그 일정의 「예약」 행(한 일정에 하나). [fix] 수업·점검을 거쳐 되돌린 양도는
-        //    그때 쥐고 있던 사람의 등록시각을 이어받으므로, 같은 예약자의 닫힌 백업 행보다 먼저 본다
-        one(evs.filter(x => x.status === STATUS.ACTIVE)) || one(sameStart) ||
-        // 4) 일정ID가 바뀐 같은 예약(같은 동기화에서 지우고 다시 만듦·반복 일정 나누기)
-        (evs.length ? null : one(bySlot.get(r.calendarId + '|' + r.start + '|' + r.end + '|' + r.bookerKey) || [])) ||
-        // 5) 그 일정의 등록시각이 하나뿐
-        one(evs) ||
-        // 6) 그래도 하나로 못 정하면(예전 판이 남긴 같은 일정의 「예약」 행 둘 등) 가장 가까운 후보 중 가장 이른 등록시각.
-        //    빈 칸으로 두면 중복 순위 1순위·「등록 01/01」로 나오므로, 백업 순서와 상관없이 같은 값을 고른다
-        earliest_([sameStart.filter(x => x.status === r.status), sameStart.filter(x => x.status === STATUS.ACTIVE), sameStart,
-          evs.filter(x => x.status === STATUS.ACTIVE), evs].find(l => l.length) || []);
-      if (!was) continue;
-      const rivals = sameStart.some(x => x.created !== was.created || x.status !== was.status || x.kind !== was.kind);
-      out.push({ row: r, was, same: !!same, rivals });
-    }
-    return { matches: out, maxCreated };
-  }
-
-  /** 비어 있는 등록시각을 백업에서 되살린다. 반환: [{ row, was }] */
-  function restoreFromBackup() {
-    const m = matchBackup(r => !r.created);
-    if (!m) return [];
-    for (const { row: r, was } of m.matches) {
-      r.created = was.created;
-      if (pending.indexOf(r) < 0) dirty.add(r);
-    }
-    return m.matches;
-  }
-
   return {
     sheet,
 
     all: load,
 
-    restoreFromBackup,
-
-    matchBackup,
-
     /** 「예약기록」 열 제목 → 열 위치(0부터) */
     columns,
-
-    arrangeColumns,
 
     byRow(rowNum) {
       load();
@@ -462,26 +298,11 @@ const Store = (() => {
       return add.map(a => a[0]);
     },
 
-    /** 「사용자」 시트에서 이 이름들의 행을 지운다(별칭·이메일이 빈 행만). 반환: 지운 이름들 */
-    removeUsers(names) {
-      const sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.USERS);
-      if (!sh || !names.length) return [];
-      const keys = new Set(names.map(bookerKeyOf));
-      const values = sh.getDataRange().getValues();
-      const removed = [];
-      for (let i = values.length - 1; i >= 1; i--) {
-        const v = values[i];
-        if (!keys.has(bookerKeyOf(v[0])) || String(v[1] || '').trim() || String(v[2] || '').trim()) continue;
-        sh.deleteRow(i + 1);
-        removed.unshift(String(v[0]).trim());
-      }
-      if (removed.length) aliasCache = null;
-      return removed;
-    },
-
+    /** 「주간보고」에 지난주 사람별 행을 덧붙인다. 시트를 지웠으면 건너뛴다(브리핑은 「예약기록」에서 계산하므로 영향 없음) */
     appendWeekly(values) {
       if (values.length) {
-        const sh = sheet(SHEETS.WEEKLY);
+        const sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.WEEKLY);
+        if (!sh) { console.log('「' + SHEETS.WEEKLY + '」 시트가 없어 주간 기록을 남기지 않았습니다.'); return; }
         ensureRows(sh, sh.getLastRow() + values.length, [1]);
         sh.getRange(sh.getLastRow() + 1, 1, values.length, values[0].length).setValues(values.map(r => r.map(safeText_)));
       }

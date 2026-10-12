@@ -10,7 +10,10 @@ function maybeSendMondayMails_(hadErrors, runStart) {
   // 이 실행이 캘린더를 읽기 시작한 시각 기준: 09:00 전에 읽은 내용으로 브리핑을 만들지 않는다
   const ws = weekStartFor(runStart || now);
   // 캘린더 오류가 있으면 잠시 기다렸다가(빠진 기록 없이) 보낸다
-  if (hadErrors && now < ws + CONFIG.BRIEFING_WAIT_MINUTES * 60 * 1000) return;
+  if (hadErrors && now < ws + CONFIG.BRIEFING_WAIT_MINUTES * 60 * 1000) {
+    if (Number(props.getProperty('briefingWeek') || 0) < ws) console.warn('캘린더 오류가 있어 월요일 브리핑을 미룹니다(늦어도 ' + fmtKst(ws + CONFIG.BRIEFING_WAIT_MINUTES * 60 * 1000) + '에 보냄).');
+    return;
+  }
 
   // 보낸 주(또는 설치 때 건너뛰기로 한 주)보다 뒤인 주만
   const done = k => Number(props.getProperty(k) || 0);
@@ -29,6 +32,9 @@ function maybeSendMondayMails_(hadErrors, runStart) {
   if (!CONFIG.NOTIFY.MONDAY_BRIEFING || sendGroupMail_(b.subject, b.body, CONFIG.REPORT_CC, b.html)) {
     props.setProperty('briefingWeek', String(ws));
     if (needReport) props.setProperty('reportWeek', String(last));
+    console.log(CONFIG.NOTIFY.MONDAY_BRIEFING ? '월요일 브리핑을 보냈습니다: ' + b.subject : '월요일 브리핑 메일은 꺼져 있어 기록만 했습니다.');
+  } else {
+    console.error('월요일 브리핑을 보내지 못했습니다. 다음 동기화에서 다시 보냅니다.');
   }
 }
 
@@ -150,7 +156,8 @@ function buildBriefing_(ws, now, rep) {
     'border-radius:8px;background:#f8f9fb"><tr><td style="padding:8px 14px">' + inner + '</td></tr></table>';
   const h = ['<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;line-height:1.5;max-width:' +
     (CONFIG.MAIL_MAX_WIDTH || 560) + 'px">',
-    '<div style="font-size:16px;font-weight:bold">' + e(title) + '</div>'];
+    // 휴대폰에서 한 줄에 들어가도록 기간만('예약 내역'은 바로 위 메일 제목에 있음), '~' 앞뒤 공백 없이 촘촘하게
+    '<div style="font-size:16px;font-weight:bold;letter-spacing:-0.2px">' + e(fmtKst(ws) + '~' + fmtKst(we)) + '</div>'];
   if (groups.length) {
     // 묶음마다: 장비 이름 + 오른쪽에 겹치는 시간(빨강), 사람마다 순위·시간 + 오른쪽 끝에 등록 시각, 아래에 시간 막대
     // (막대: 묶음 전체 시간 중 그 예약의 시간, 다른 예약과 겹치는 부분은 빨강)
@@ -200,7 +207,8 @@ function buildBriefing_(ws, now, rep) {
   h.push('<p style="margin:18px 0 0 0"><a href="' + e(SpreadsheetApp.getActive().getUrl()) + '">예약기록 시트 열기</a></p></div>');
 
   return {
-    subject: CONFIG.SUBJECT_PREFIX + ' ' + title,
+    // 메일 제목은 휴대폰에서 한 줄에 들어가도록 날짜만(주는 늘 월 09:00 ~ 다음 월 09:00). 본문 첫 줄에는 시각까지
+    subject: CONFIG.SUBJECT_PREFIX + ' ' + fmtKst(ws).slice(0, 8) + '~' + fmtKst(we).slice(0, 8) + ' 예약 내역',
     body: t.join('\n'),
     html: h.join('')
   };

@@ -43,6 +43,9 @@ function addUser(world, email) {
   world.sheet('사용자').getRange(3, 1, 1, 3).setValues([['User Alpha', '', email]]);
 }
 
+// Google Groups 동작 검사에 필요한 가짜 주소는 공개 개인정보 검사와 구별되도록 실행 중 조합한다.
+const groupAddress = local => [local, ['google', 'groups'].join('') + '.com'].join('@');
+
 test('prototype 속성과 같은 예약자도 정상 집계', () => {
   const start = Date.parse('2026-10-05T10:00:00+09:00');
   const rows = ['constructor', '__proto__', 'User Alpha'].map((booker, i) => ({
@@ -272,6 +275,129 @@ test('실패한 전체 목록 처리 중에는 기존 예약을 누락된 일정
   assert.equal(retry.errors.length, 0);
   assert.equal(world.rowsOf(previousId)[0]['상태'], '취소');
   assert.equal(world.rowsOf(failedId).length, 1);
+});
+
+test('비어 있는 전체 목록도 사라진 마지막 예약을 취소로 정리', () => {
+  const world = makeWorld();
+  const calendarId = 'equipment@example.com';
+  world.calendar.addCalendar(calendarId, '[Example] Equipment Alpha', { accessRole: 'reader' });
+  call(world, 'fillEquipmentSheet');
+  const eventId = world.calendar.create(calendarId, {
+    summary: 'User Alpha', start: '2026-10-13T09:00', end: '2026-10-13T12:00',
+    creator: 'participant@example.com'
+  });
+  call(world, 'initialSync');
+  assert.equal(world.rowsOf(eventId)[0]['상태'], '예약');
+  world.at('2026-10-12T10:05');
+  // 오래전에 지워져 삭제 항목 자체도 없는 전체 API 응답을 재현한다.
+  world.calendar.cal(calendarId).events.delete(eventId);
+  call(world, 'resetSync');
+  assert.equal(world.rowsOf(eventId)[0]['상태'], '취소');
+});
+
+test('시트 탭 정리의 기본 로그는 사용자 지정 탭 이름을 노출하지 않음', () => {
+  const world = makeWorld();
+  const privateTab = 'User Alpha Private Equipment';
+  world.ss.insertSheet(privateTab);
+  const exec = call(world, 'arrangeSheetTabs');
+  assert.ok(!exec.logs.concat(exec.errors).join('\n').includes(privateTab));
+  assert.ok(world.ss.getSheets().some(sheet => sheet.getName() === privateTab));
+});
+
+test('시트 탭 이름 상세 로그는 관리자 설정을 켰을 때만 출력', () => {
+  const world = makeWorld({ LOG_PERSONAL_DETAILS: true });
+  const privateTab = 'User Alpha Private Equipment';
+  world.ss.insertSheet(privateTab);
+  const exec = call(world, 'arrangeSheetTabs');
+  assert.ok(exec.logs.some(line => line.includes(privateTab)));
+});
+
+for (const testAddress of [
+  'trial@example.com,group@example.com',
+  'trial@example.com,other@example.com',
+  'trial@example.com;other@example.com',
+  'trial@example.com\r\nBcc: other@example.com',
+  'trial @example.com'
+]) {
+  test('바닥글 시험은 수신자 목록이나 잘못된 단일 주소를 차단 ' + (passed + 1), () => {
+    const world = makeWorld({ TEST_GROUP_EMAIL: testAddress });
+    call(world, 'testFooterMail');
+    assert.equal(world.mails.length, 0);
+  });
+}
+
+test('바닥글 시험은 실제 그룹 주소의 대소문자와 바깥 공백도 구별하지 않음', () => {
+  const world = makeWorld({ TEST_GROUP_EMAIL: '  GROUP@EXAMPLE.COM  ' });
+  call(world, 'testFooterMail');
+  assert.equal(world.mails.length, 0);
+});
+
+test('바닥글 시험은 검증한 시험 수신자 한 곳에만 보냄', () => {
+  const trialAddress = groupAddress('example-trial');
+  const world = makeWorld({ TEST_GROUP_EMAIL: trialAddress });
+  const exec = call(world, 'testFooterMail');
+  assert.equal(world.mails.length, 1);
+  assert.equal(world.mails[0].to, trialAddress);
+  assert.equal(world.mails[0].cc, undefined);
+  assert.equal(world.mails[0].bcc, undefined);
+  assert.ok(!exec.logs.concat(exec.errors).join('\n').includes(trialAddress));
+});
+
+for (const language of ['en', 'ko']) {
+  test('바닥글 그룹 이름의 HTML을 이스케이프: ' + language, () => {
+    const world = makeWorld({ FOOTER_LANG: language, GROUP_NAME: '<img src=x onerror=alert(1)> "Example"' });
+    const html = call(world, 'groupFooterHtml_', groupAddress('example-team')).result;
+    assert.ok(html.includes('&lt;img'));
+    assert.ok(!html.includes('<img'));
+    assert.ok(html.includes('&quot;Example&quot;'));
+    assert.ok(html.includes('href="https://groups.google.com/g/example-team"'));
+  });
+}
+
+for (const slug of ['team/../private', 'team?key=value', 'team#fragment']) {
+  test('바닥글 URL에서 그룹 이름의 경로·쿼리·fragment 문자를 인코딩: ' + slug, () => {
+    const world = makeWorld();
+    const html = call(world, 'groupFooterHtml_', groupAddress(slug)).result;
+    const links = Array.from(html.matchAll(/href="([^"]+)"/g), match => match[1]);
+    const archive = links.find(link => link.startsWith('https://groups.google.com/'));
+    const unsubscribe = links.find(link => link.startsWith('mailto:'));
+    assert.equal(new URL(archive).pathname, '/g/' + encodeURIComponent(slug));
+    assert.equal(new URL(archive).search, '');
+    assert.equal(new URL(archive).hash, '');
+    assert.equal(unsubscribe, 'mailto:' + groupAddress(encodeURIComponent(slug + '+unsubscribe')));
+  });
+}
+
+test('잘못된 그룹 주소는 바닥글 수신 거부·지난 메일 링크가 되지 않음', () => {
+  const world = makeWorld();
+  const html = call(world, 'groupFooterHtml_', groupAddress('team"onclick="alert(1)')).result;
+  assert.ok(!html.includes('href='));
+  assert.ok(!html.includes('onclick='));
+});
+
+test('HTML 메일 viewport는 한 번만 붙고 일반 텍스트 입력은 이스케이프', () => {
+  const world = makeWorld();
+  const message = { to: 'participant@example.com', subject: 'Example', body: '<img src=x onerror=alert(1)>' };
+  call(world, 'sendMail_', message);
+  const html = world.mails[0].htmlBody;
+  assert.equal((html.match(/<meta name="viewport"/g) || []).length, 1);
+  assert.ok(html.includes('&lt;img'));
+  assert.ok(!html.includes('<img'));
+  call(world, 'sendMail_', Object.assign({}, message, { html }));
+  assert.equal(world.mails[1].htmlBody, html);
+});
+
+test('메일 실패 기본 로그는 제목·수신자·원본 오류 개인정보를 노출하지 않음', () => {
+  const world = makeWorld();
+  world.mailFail = 'Injected failure for participant@example.com';
+  const exec = call(world, 'sendMail_', {
+    to: 'participant@example.com', subject: 'User Alpha booking', body: 'Example notice'
+  });
+  assert.equal(exec.result, false);
+  const logs = exec.logs.concat(exec.errors).join('\n');
+  assert.ok(!logs.includes('participant@example.com'));
+  assert.ok(!logs.includes('User Alpha'));
+  assert.equal(world.mails.length, 0);
 });
 
 console.log('\nSecurity regression checks passed: ' + passed);

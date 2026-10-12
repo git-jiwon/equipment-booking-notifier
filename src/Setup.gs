@@ -28,17 +28,9 @@ function setup() {
   [0, 1, 2].forEach(i => col(us, i).setNumberFormat('@'));
   ensureUserHeaders_();
 
-  // 예약기록: 예전 열 순서인 시트는 백업한 뒤 새 순서로 옮겨 적는다. 열 너비·서식·숨김은 formatRecordSheet_
+  // 예약기록: 열 너비·서식(글자·날짜)·스크립트용 열 숨김·직전 취소 빨간색은 formatRecordSheet_
   const res = make(SHEETS.RESERVATIONS, RES_HEADERS, []);
-  if (!withLock_(() => {
-    // 예전 판이 이미 옮긴 시트(1·2판)는 동기화와 같은 정리(빨간색 규칙, 빠진 등록시각 되살리기)를 건너뛰지 않는다
-    if (Number(PropertiesService.getScriptProperties().getProperty('columnsVersion') || 0) >= 1) { migrateColumns_(); return false; }
-    const moved = Store.arrangeColumns();
-    PropertiesService.getScriptProperties().setProperty('columnsVersion', '4');
-    return moved;
-  })) {
-    formatRecordSheet_(res, Store.columns());
-  }
+  formatRecordSheet_(res, Store.columns());
 
   const wk = make(SHEETS.WEEKLY, ['주 시작', '예약자', '사용', '정상취소·변경', '직전취소', '이행률', '사용일', '취소일'],
     [140, 140, 60, 90, 70, 70, 320, 320]);
@@ -47,7 +39,28 @@ function setup() {
   col(wk, 5).setNumberFormat('0%');
 
   protectSheets();
+  arrangeSheetTabs();
   console.log('시트 준비 완료. fillEquipmentSheet()를 실행해 캘린더 목록을 채우세요.');
+}
+
+/** 시트 탭 순서(왼쪽부터). 스크립트는 시트를 이름으로 찾으므로 순서는 보기 편하게만 정한다 */
+const sheetTabOrder_ = () => [SHEETS.RESERVATIONS, SHEETS.WEEKLY, SHEETS.EQUIPMENT, SHEETS.USERS];
+
+/** 탭을 예약기록 · 주간보고 · 장비 · 사용자 순서로 놓는다(그 밖의 탭은 뒤에 그대로). 여러 번 실행해도 된다 */
+function arrangeSheetTabs() {
+  const ss = SpreadsheetApp.getActive();
+  const order = sheetTabOrder_();
+  let pos = 1;
+  for (const name of order) {
+    const sh = ss.getSheetByName(name);
+    if (!sh) continue;
+    ss.setActiveSheet(sh);
+    ss.moveActiveSheet(pos++);
+  }
+  const first = ss.getSheetByName(order[0]);
+  if (first) ss.setActiveSheet(first);
+  console.log('시트 탭 순서를 정리했습니다.');
+  logPersonalDetails_('시트 탭 순서: ' + ss.getSheets().map(s => s.getName()).join(' · '));
 }
 
 /**
@@ -261,6 +274,23 @@ function testMail() {
   const ok = sendAdminMail_(CONFIG.SUBJECT_PREFIX + ' 테스트(관리자)', '장비 예약 알림 메일 발송 테스트입니다.');
   console.log((ok ? '관리자 테스트 메일을 보냈습니다.' : '관리자 테스트 메일에 실패했습니다.') + ' / 남은 일일 할당량: ' + safeQuota_());
   logPersonalDetails_('관리자 테스트 수신자: ' + CONFIG.ADMIN_EMAILS.join(','));
+}
+
+/**
+ * 그룹 메일 맨 아래 안내(GROUP_FOOTER = 'notice') 시험. Config.gs의 TEST_GROUP_EMAIL(관리자만 회원인 시험용 그룹 주소)로
+ * 이번 주 브리핑 견본을 한 통 보낸다. 실제 그룹에는 보내지 않는다. 그룹을 거쳐 받은 메일의 맨 아래를 확인한다.
+ */
+function testFooterMail() {
+  const to = String(CONFIG.TEST_GROUP_EMAIL || '').trim();
+  if (!isSingleEmail_(to) || to.toLowerCase() === String(CONFIG.GROUP_EMAIL || '').trim().toLowerCase()) {
+    console.warn('Config.gs의 TEST_GROUP_EMAIL에 실제 그룹이 아닌 시험용 그룹 주소를 적은 뒤 다시 실행하세요.');
+    return;
+  }
+  const now = Date.now();
+  const b = buildBriefing_(weekStartFor(now), now, null);
+  const ok = sendMail_({ to, subject: '[시험] ' + b.subject, body: b.body, html: b.html + groupFooterHtml_(to) });
+  console.log(ok ? '시험용 그룹으로 견본을 보냈습니다. 그룹을 거쳐 받은 메일의 맨 아래를 확인하세요.' :
+    '시험 메일을 보내지 못했습니다(주소 형식 확인).');
 }
 
 /** 그룹으로 실제 한 통(그룹 게시 권한·회원 수신 확인용) */

@@ -34,7 +34,7 @@ const clone = o => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)))
 // ---------------------------------------------------------------- bundle
 const BUNDLES = {};
 let BUNDLE = null;
-/** order: 'editor'(편집기 순서) | 'alpha'(clasp처럼 이름순). dir: 다른 소스 폴더(예: 예전 판 사본, 없으면 SRC_DIR) */
+/** order: 'editor'(편집기 순서) | 'alpha'(clasp처럼 이름순). dir: 다른 소스 폴더(예: 운영본 src, 없으면 SRC_DIR) */
 function bundle(order, dir) {
   order = order || 'editor';
   const srcDir = dir ? path.resolve(dir) : SRC_DIR;
@@ -269,6 +269,14 @@ class MockSpreadsheet {
   getName() { return '장비 예약 기록'; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   getSheets() { return this.sheets.slice(); }
+  getActiveSheet() { return this.active && this.sheets.indexOf(this.active) >= 0 ? this.active : this.sheets[0] || null; }
+  setActiveSheet(s) { this.active = s; return s; }
+  /** 선택한 시트를 pos번째(1부터) 탭으로 옮긴다 */
+  moveActiveSheet(pos) {
+    const s = this.getActiveSheet();
+    this.sheets = this.sheets.filter(x => x !== s);
+    this.sheets.splice(Math.max(0, Math.min(pos - 1, this.sheets.length)), 0, s);
+  }
   insertSheet(n) {
     if (this.getSheetByName(n)) throw new Error('A sheet with the name "' + n + '" already exists. Please enter another name.');
     const s = new MockSheet(this, n);

@@ -1,6 +1,6 @@
 'use strict';
 
-// Run every suite in a fresh process, retaining SIM_ORDER, ORDER and other options.
+// Run every suite in a fresh process, retaining SIM_ORDER and other options.
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');

@@ -26,6 +26,17 @@ const CONFIG = {
   // 예약자·이메일·일정 제목 등 개인정보가 포함된 상세 로그는 필요할 때만 켠다.
   LOG_PERSONAL_DETAILS: false,
 
+  // 그룹 메일 맨 아래 바닥글(구글 그룹스가 붙이는 수신 거부 안내):
+  //   'notice' : 그룹스 바닥글을 숨기고 '--' 아래 작은 회색 안내 세 줄(그룹 이름·수신 거부 주소·지난 메일 링크)
+  //   ''       : 그룹스 바닥글 그대로
+  GROUP_FOOTER: '',
+  // 위 안내의 언어: 'en'(영어) | 'ko'(한국어)
+  FOOTER_LANG: 'en',
+  // testFooterMail이 견본을 보낼 시험용 그룹 주소(관리자만 회원, 실제 그룹 말고)
+  TEST_GROUP_EMAIL: '',
+  // 그룹 표시 이름(그룹 메일 아래 안내에 씀, 비우면 생략)
+  GROUP_NAME: 'Example Equipment Group',
+
   // 메일 보낸 사람 표시 이름, 제목 머리말(Gmail 필터용)
   SENDER_NAME: 'Equipment Booking',
   SUBJECT_PREFIX: '[장비예약]',
