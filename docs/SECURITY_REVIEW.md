@@ -1,37 +1,39 @@
-# 공개판 보안·개인정보 점검
+# Public release security and privacy review
 
-대상은 Google Apps Script 소스, 테스트와 이전 버전 fixture, README, 저장소 게시 설정입니다. 공개 파일은 가상 이메일·예약자·장비·실험실·캘린더 ID를 사용합니다. 로컬 경로, 기관 도메인, 특정 운영 사건 기록과 원본 백업은 게시하지 않습니다.
+[한국어](SECURITY_REVIEW.ko.md) · [User guide](../README.md)
 
-## 수정한 항목
+This review covers the Google Apps Script source, tests and older-version fixtures, README, and repository publication settings. Public files use fictional email addresses, users, equipment, lab labels, and calendar IDs. Local computer paths, institution domains, specific operational incident records, and original backups are excluded from publication.
 
-| 항목 | 보완 |
+## Changes applied
+
+| Issue | Mitigation |
 |---|---|
-| 캘린더 이름의 시트 수식 주입 | 외부 텍스트를 시트에 쓰기 전에 수식 시작 문자를 일반 텍스트로 처리. 예약기록의 모든 텍스트 필드에도 적용 |
-| 특수 예약자·캘린더 ID의 키 충돌 | 통계·그룹 객체의 프로토타입 제거로 `constructor`, `__proto__` 키도 독립 값으로 처리 |
-| 개인 알림의 다중 수신자 주입 | 개인 주소는 단일 이메일로 검증. 잘못된 주소는 관리자에게 안내 |
-| 메일 헤더 형식 | 수신자 형식 검증과 주소 목록·제목·발신자 이름의 줄바꿈 차단 |
-| 운영 개인정보 로그 | 원본 이름·주소·본문·일정 식별자를 포함한 상세 로그는 `LOG_PERSONAL_DETAILS: true`일 때만 출력 |
-| 실패 일정 누락 | 해당 캘린더의 처리 실패 시 동기화 토큰과 마지막 성공 시각을 유지하여 다음 실행에 재시도 |
-| 게시 내용·설정 | README와 fixture까지 익명화, 인증·내보내기·로그·백업 제외, 공개 파일 패턴 검사 |
+| Spreadsheet formula injection through calendar names | Escape formula prefixes before writing external text to Sheets. Apply the same protection to every text field in reservation records. |
+| Special user names or calendar IDs colliding with object keys | Use objects without a prototype for statistics and calendar grouping so keys such as `constructor` and `__proto__` are handled as independent values. |
+| Extra recipients injected into a personal notification | Require one email address for each personal recipient. Route an invalid personal address to an administrator notification. |
+| Mail header format | Validate recipient syntax and reject line breaks in recipient lists, subjects, and sender display names. |
+| Personal information in application logs | Log original names, addresses, message bodies, and event identifiers only when `LOG_PERSONAL_DETAILS: true` is explicitly enabled. |
+| Failed events skipped by incremental synchronization | Keep that calendar's previous sync token and last successful synchronization time after event processing fails, allowing the next run to retry. |
+| Publication content and configuration | Anonymize the README and fixtures, exclude credentials, exports, logs, and backups, and scan public files for common identifiers and secrets. |
 
-이메일 HTML은 동적 텍스트를 이스케이프합니다. 매니페스트는 Calendar 읽기 전용, 현재 스프레드시트, 메일 발송, 트리거 관리 범위를 사용하고 외부 HTTP 요청 권한을 추가하지 않습니다.
+Dynamic text in email HTML is escaped. The manifest uses read-only Calendar access, the current spreadsheet, email sending, and trigger management scopes. It does not add permission for external HTTP requests.
 
-## 검증
+## Validation
 
-`npm test`로 규칙·시뮬레이션·복구·보안·공개 파일 검사 전체를 실행합니다. 파일 로딩 순서와 백업 정렬 순서 변형도 확인합니다. 보안 회귀 테스트는 저장·발송 경계의 악성 입력, 상세 로그 설정, 실패 후 재시도를 검증합니다. Google 서비스를 실제로 호출하지 않습니다.
+Run `npm test` for the rule, simulation, recovery, security, and public-file checks. Additional runs verify alternate source loading and backup sorting orders. Security regression checks cover malicious inputs at the spreadsheet and mail boundaries, detailed logging settings, and retry after processing failures. Tests do not call live Google services.
 
-최초 게시 커밋에는 익명화된 파일만 포함하고 작성자 이름·이메일도 가상 값을 사용합니다. 기존 원본에 Git 기록이 없으므로 과거 개인정보 기록을 가져오지 않습니다. 원본 백업과 로컬 점검 기록은 저장소 밖에 유지합니다.
+The first published commit contains only anonymized files and uses a fictional author and committer name and email. The original folder had no Git repository, so no historical records containing the original personal information were imported. Original backups and local review records remain outside the repository.
 
-## 운영 개인정보와 검증 한계
+## Operational personal information and review limits
 
-실제 설치 후 시트와 스크립트 속성에는 예약자의 이름·일정·이메일·내부 ID가 저장됩니다. 알림과 그룹 브리핑도 예약 정보를 공유합니다. 상세 로그를 켜거나 플랫폼에서 예외를 기록하면 운영 데이터가 남을 수 있습니다. 편집·열람 권한, 그룹 회원·기록 접근, 데이터 보관·삭제 정책은 운영자가 관리합니다.
+After real deployment, Sheets and script properties store user names, schedules, email addresses, and internal IDs. Notifications and group briefings also share booking information. Enabling detailed logs or allowing platform exception logging may retain operational data. Operators must manage editing and viewing permissions, group membership and archive access, and data retention and deletion policies.
 
-시트 보호와 열 숨김은 열람 권한을 제한하지 않습니다. 패턴 검사는 인명이나 기관명을 완벽히 판별하지 않습니다. 본 점검은 소스와 모의 실행 범위이며 실서비스 권한, 계정 보안, 실제 메일 전달, Google 플랫폼의 모든 예외 경로까지 검증하지 않습니다. 과거 소스는 익명화했지만 최신 보안 수정은 운영용 `src/`에 적용되어 있으므로 fixture를 배포하지 마세요.
+Sheet protection and hidden columns do not restrict viewing access. Pattern checks cannot identify every real name or institution. This review covers source code and simulated execution; it does not validate live service permissions, account security, actual email delivery, or every Google platform exception path. Historical source fixtures are anonymized, but the current security fixes apply to the production `src/` files. Do not deploy the fixtures.
 
-GitHub 계정과 프로필은 서비스에서 표시하는 게시 계정 정보입니다. 콘텐츠 익명화와 별개이며 계정 자체를 익명화하지 않습니다.
+GitHub displays the publishing account and its profile. Content anonymization does not anonymize the account itself.
 
-## 참고
+## References
 
-- [Google Apps Script Range.setValues](https://developers.google.com/apps-script/reference/spreadsheet/range#setValues(Object)): `=`로 시작하는 값의 수식 해석.
-- [Google Apps Script MailApp](https://developers.google.com/apps-script/reference/mail/mail-app): 수신자 목록과 발송 옵션.
-- [Apps Script OAuth 범위](https://developers.google.com/apps-script/concepts/scopes): 매니페스트 권한 관리.
+- [Google Apps Script Range.setValues](https://developers.google.com/apps-script/reference/spreadsheet/range#setValues(Object)): values beginning with `=` are interpreted as formulas.
+- [Google Apps Script MailApp](https://developers.google.com/apps-script/reference/mail/mail-app): recipient lists and message options.
+- [Apps Script OAuth scopes](https://developers.google.com/apps-script/concepts/scopes): permissions in the manifest.

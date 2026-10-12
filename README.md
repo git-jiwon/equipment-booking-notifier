@@ -1,49 +1,51 @@
-# 장비 예약 알림 · Equipment Booking Notifier
+# Equipment Booking Notifier
 
-장비별 Google Calendar를 읽고 예약 기록, 직전 취소 알림, 월요일 브리핑을 만드는 Google Apps Script입니다. Google Sheets에 연결해 사용하며 별도 서버가 필요하지 않습니다.
+[한국어 안내](README.ko.md) · [Security review](docs/SECURITY_REVIEW.md)
 
-**공개용 예시 저장소입니다.** 이메일, 예약자, 기관·실험실 이름, 호실, 캘린더 ID는 가상 값입니다. 실제 운영 정보와 로컬 컴퓨터 경로는 포함하지 않습니다. `example.com` 주소는 설명용이며 설치 전에 본인의 관리 계정과 그룹 주소로 교체해야 합니다.
+A Google Apps Script that reads a separate Google Calendar for each piece of equipment and creates booking records, late cancellation notifications, and Monday briefings. It runs from Google Sheets without a separate server.
 
-## 주요 기능
+**This is a public example repository.** All email addresses, booker names, organization and laboratory names, room numbers, and calendar IDs are fictional. No real operational details or local computer paths are included. Addresses at `example.com` are placeholders; replace them with your own administrator and group addresses before installation.
 
-| 상황 | 받는 사람 | 처리 |
+## Features
+
+| Event | Recipient | Action |
 |---|---|---|
-| 이번 주 예약의 직전 취소 | 설정한 그룹 | 장비, 예약 시간, 예약자, 취소 시각 안내. 다른 예약이 이미 전부 차지하면 발송하지 않음 |
-| 월요일 09:00 이후 첫 동기화 | 설정한 그룹 | 이번 주 예약, 중복 순위, 규칙 확인, 지난주 사용·직전 취소와 최근 4주 직전 취소 요약 |
-| 아직 예약이 열리지 않은 주의 예약 | 예약자 개인 | 해당 주 예약 시작 시각과 예약 정리 안내. 주소를 확인할 수 없으면 관리자에게 전달 |
-| 등록·정상 취소·변경·중복 예약 | 없음 | 예약기록 시트에 기록 |
-| 동기화 오류 | 관리자 | 같은 캘린더는 하루 한 번 안내 |
+| Late cancellation of a booking for the current week | Configured group | Reports the equipment, booking time, booker, and cancellation time. No notification is sent if other bookings already occupy the entire released slot. |
+| First synchronization after 09:00 on Monday | Configured group | Summarizes this week's bookings, overlap priority, rule checks, last week's usage and late cancellations, and late cancellations over the last four weeks. |
+| Booking made before its week's booking window opens | Individual booker | Explains when bookings open for that week and asks the booker to correct the booking. If no valid address is available, the notice goes to an administrator. |
+| New booking, ordinary cancellation, change, or overlapping booking | None | Recorded in the booking log sheet. |
+| Synchronization error | Administrator | Reported at most once per calendar per day. |
 
-예약을 강제로 삭제하거나 수정하지 않습니다. 중복과 규칙 위반은 기록과 브리핑으로 안내합니다.
+The script does not force changes to or deletion of calendar bookings. Overlaps and rule violations are recorded and included in briefings.
 
-## 예약 규칙
+## Booking rules
 
-모든 시간은 `Asia/Seoul` 기준입니다. 사용 주는 월요일 09:00부터 다음 월요일 09:00까지이고 사용일은 09:00부터 다음 날 09:00까지입니다.
+All times use `Asia/Seoul`. A usage week runs from Monday at 09:00 to the following Monday at 09:00. A usage day runs from 09:00 to 09:00 the next day.
 
-| 구분 | 등록 조건 | 직전 취소 기준 |
+| Booking type | Registration window or condition | Late cancellation threshold |
 |---|---|---|
-| 정기예약 | 해당 주 직전 일요일 18:00 ~ 월요일 09:00 | 월요일 09:00 이후 취소 |
-| 추가예약 | 월요일 09:00 이후 등록 | 사용일 09:00 이후 취소 |
-| 기간전예약 | 해당 주 예약이 열리기 전에 등록 | 정기예약 기준 적용, 개인 안내 |
-| 수업예약 | 제목에 `for class` 포함 | 직전 취소·이행률·규칙 집계 제외 |
-| 점검 | 제목이 `[Fix]`로 시작 | 직전 취소·이행률·규칙 집계 제외, 겹침 확인에는 포함 |
+| Regular booking | From 18:00 on the Sunday immediately before the usage week to 09:00 on Monday | Cancellation after 09:00 on Monday |
+| Additional booking | Registered after 09:00 on Monday | Cancellation after 09:00 on the usage day |
+| Early booking | Registered before bookings open for the usage week | Uses the regular booking threshold; the booker receives an individual notice. |
+| Class booking | Title contains `for class` | Excluded from late cancellation, fulfillment rate, and rule statistics. |
+| Maintenance | Title starts with `[Fix]` | Excluded from late cancellation, fulfillment rate, and rule statistics; included in overlap checks. |
 
-- 등록 후 10분 안의 취소는 유예합니다(`GRACE_MINUTES`).
-- 정기예약은 기본적으로 장비별 하루 1세션입니다. 경계에 맞지 않는 시간은 3시간을 1세션으로 셉니다.
-- 세션 경계는 09·12·15·18·21·24시이며 24:00 ~ 다음 날 09:00도 한 세션입니다.
-- 중복은 캘린더 등록 시각이 빠른 예약을 우선합니다. 점검은 첫 순위이고 후순위 예약의 취소·이동은 양보로 처리합니다.
-- 사용 시작 전 이름 변경은 양도입니다. 사용 시작 후 제목 변경은 메모로 처리하고 원래 예약자·구분을 유지합니다.
-- 원래 시간과 겹치게 늘리거나 줄이면 같은 예약입니다. 겹치지 않는 시간이나 다른 장비로 옮기면 원래 예약을 변경 상태로 닫습니다.
-- 사용 시작 이후 삭제도 직전 취소가 될 수 있습니다. 지난 일정은 삭제하지 않는 방식으로 운영하세요.
-- 반복 일정은 앞으로 28일 안의 회차를 기록하고 하루 한 번 범위를 보충합니다.
+- Cancellations within 10 minutes of registration receive a grace period (`GRACE_MINUTES`).
+- Regular bookings are normally limited to one session per day per piece of equipment. For times that do not match session boundaries, each three hours count as one session.
+- Session boundaries are 09:00, 12:00, 15:00, 18:00, 21:00, and 24:00. The period from 24:00 to 09:00 the next day is also one session.
+- Earlier calendar registration has priority when bookings overlap. Maintenance has first priority. Cancellation or rescheduling of a lower-priority booking is treated as yielding the slot.
+- Changing the name before the booking starts is treated as a transfer. Changing the title after the booking starts is treated as a note; the original booker and booking type are retained.
+- Extending or shortening a booking while it still overlaps its original time keeps it as the same booking. Moving it to a non-overlapping time or different equipment closes the original record with a changed status.
+- Deleting a booking after its start can also count as a late cancellation. Keep past events instead of deleting them.
+- Recurring events are recorded for occurrences within the next 28 days. The range is extended once a day.
 
-## 설치
+## Installation
 
-1. 관리 계정이 장비 캘린더를 읽을 수 있게 공유합니다. 비공개 일정 제목까지 필요하면 캘린더의 적절한 공유 권한을 설정하세요. 스크립트는 읽기 전용 Calendar OAuth 범위를 사용합니다.
-2. 새 Google 스프레드시트에서 **확장 프로그램 → Apps Script**를 엽니다.
-3. `src/`의 `.gs` 파일 7개를 같은 이름으로 추가합니다: Config, Rules, Store, Sync, Notify, Report, Setup.
-4. 프로젝트 설정에서 `appsscript.json` 표시를 켜고 `src/appsscript.json`을 적용합니다. Calendar 고급 서비스 활성화를 확인하세요. 표준 Google Cloud 프로젝트를 연결했다면 Calendar API도 활성화합니다.
-5. **Apps Script 편집기에서** 아래 예시 주소를 실제 운영 주소로 교체합니다. 공개 저장소에는 실제 주소를 커밋하지 마세요.
+1. Share the equipment calendars with the administrator account so it can read them. Set the appropriate sharing permissions if the script also needs titles of private events. The script uses the read-only Calendar OAuth scope.
+2. Open a new Google spreadsheet and choose **Extensions → Apps Script**.
+3. Add the seven `.gs` files from `src/` under the same names: Config, Rules, Store, Sync, Notify, Report, and Setup.
+4. Enable the display of `appsscript.json` in project settings and apply `src/appsscript.json`. Confirm that the advanced Calendar service is enabled. If you have connected a standard Google Cloud project, also enable the Calendar API there.
+5. **In the Apps Script editor**, replace the example addresses below with your operational addresses. Do not commit real addresses to the public repository.
 
 ```javascript
 GROUP_EMAIL: 'equipment-group@example.com',
@@ -54,79 +56,81 @@ DAY_LIMIT_EXEMPT: [],
 LOG_PERSONAL_DETAILS: false,
 ```
 
-`GROUP_EMAIL`은 본인이 만든 그룹의 주소입니다. 사용하지 않는 관리자 예시 주소는 제거합니다. `REPORT_CC`는 브리핑 추가 수신자이고 `DAY_LIMIT_EXEMPT`에는 하루 제한에서 제외할 장비의 실제 캘린더 ID를 필요할 때만 넣습니다. 개인 수신자 칸에는 이메일 한 개만 입력합니다.
+`GROUP_EMAIL` is the address of a group you create. Remove any unused example administrator addresses. `REPORT_CC` adds briefing recipients. Add actual calendar IDs to `DAY_LIMIT_EXEMPT` only for equipment that needs an exemption from the daily limit. Enter only one email address in each individual recipient field.
 
-6. 아래 순서로 실행하고 필요한 권한을 승인합니다.
+6. Run the following steps in order and authorize the required permissions.
 
-| 순서 | 함수 | 내용 |
+| Step | Function or action | Purpose |
 |---|---|---|
-| 1 | `setup` | 장비·사용자·예약기록·주간보고 시트 생성과 편집 보호 |
-| 2 | `fillEquipmentSheet` | 보이는 캘린더 목록 채우기 |
-| 3 | 시트 확인 | `[LAB-A] Equipment A`처럼 대괄호로 시작하는 캘린더는 자동으로 사용 Y가 됩니다. 장비 캘린더만 Y로 지정 |
-| 4 | `checkCalendars` | 캘린더 접근 권한 확인 |
-| 5 | `previewBookerNames` | 제목에서 읽은 이름 점검. 상세 로그가 필요할 때만 `LOG_PERSONAL_DETAILS: true`를 잠시 설정 |
-| 6 | `testMail` | 관리자 테스트 메일 실제 발송 |
-| 7 | `testGroupMail` | 그룹 테스트 메일 실제 발송과 회원 수신 확인 |
-| 8 | `initialSync` | 현재 예약을 알림 없이 기록 |
-| 9 | `installTriggers` | 기본 5분 간격 동기화 설치 |
+| 1 | `setup` | Creates and protects the equipment, user, booking log, and weekly report sheets. |
+| 2 | `fillEquipmentSheet` | Fills the equipment sheet with visible calendars. |
+| 3 | Review the sheet | Calendar names starting with brackets, such as `[LAB-A] Equipment A`, are automatically marked Y for use. Mark only equipment calendars Y. |
+| 4 | `checkCalendars` | Checks calendar access. |
+| 5 | `previewBookerNames` | Checks names parsed from titles. Temporarily set `LOG_PERSONAL_DETAILS: true` only when detailed logs are needed. |
+| 6 | `testMail` | Sends a real test email to the administrators. |
+| 7 | `testGroupMail` | Sends a real test email to the group; confirm that members receive it. |
+| 8 | `initialSync` | Records current bookings without notifications. |
+| 9 | `installTriggers` | Installs synchronization at the default five-minute interval. |
 
-설치한 주는 일부만 관측했으므로 그 주 통계를 건너뜁니다. 다음 월요일부터 브리핑을 시작하고 지난주 통계는 온전한 주를 관측한 뒤 포함합니다. 시간 기반 트리거이므로 정확히 09:00에 발송되는 것은 아닙니다.
+The installation week is only partially observed, so its statistics are skipped. Briefings begin the following Monday, and previous-week statistics are included once a full week has been observed. Time-based triggers do not guarantee delivery at exactly 09:00.
 
-clasp를 사용하면 업로드 대상을 `src/`만 지정하세요. `tests/`와 과거 버전 fixture는 배포하지 않습니다. 인증 파일과 프로젝트 ID 파일도 Git에 포함하지 않습니다.
+If you use clasp, upload only `src/`. Do not deploy `tests/` or fixtures from older versions. Keep authentication files and project ID files out of Git as well.
 
-## 시트와 예약자 예시
+## Sheets and example bookers
 
-| 시트 | 내용 |
-|---|---|
-| 장비 | 장비 표시 이름, 캘린더 ID, 사용 여부, 접근 권한 |
-| 사용자 | 대표 이름, 쉼표로 구분한 별칭, 선택적 개인 이메일 |
-| 예약기록 | 등록·예약·취소 시각, 상태, 예약자, 원본 제목, 만든 계정, 규칙 확인 및 내부 ID |
-| 주간보고 | 사용·취소·직전 취소 수, 이행률과 날짜 |
+The script creates sheets with the following Korean names. Keep these names when using the script.
 
-예약자는 일정 제목에서 읽습니다. `UserA (Sample)`는 `UserA`, `[Equipment A] UserB`는 `UserB`로 읽습니다. `UserA for class - UserB`는 실제 사용자 `UserB`로 읽고 수업으로 구분합니다. 한글 이름 파싱 예시는 `가나`, `다라`를 사용합니다.
+| Sheet | English meaning | Contents |
+|---|---|---|
+| `장비` | Equipment | Display name, calendar ID, enabled status, and access permissions. |
+| `사용자` | Users | Canonical name, comma-separated aliases, and optional individual email address. |
+| `예약기록` | Booking log | Registration, booking, and cancellation times; status; booker; original title; creator account; rule checks; and internal IDs. |
+| `주간보고` | Weekly report | Counts of usage, cancellations, and late cancellations, plus fulfillment rates and dates. |
 
-새 이름은 사용자 시트에 자동으로 추가됩니다. 같은 사람의 다른 표기는 대표 이름 행의 별칭으로 묶습니다. 사용자 시트 이메일을 우선 사용하고 없으면 일정을 만든 계정으로 개인 메일을 보냅니다. 관리자·그룹·캘린더 계정은 개인 수신자로 사용하지 않습니다. 잘못된 개인 주소는 관리자 안내로 전환합니다.
+The booker's name is parsed from the event title. `UserA (Sample)` is read as `UserA`, and `[Equipment A] UserB` is read as `UserB`. `UserA for class - UserB` is read as a class booking for `UserB`. These are fictional examples; the Korean name-parsing examples use the fictional names `가나` and `다라`.
 
-예약기록은 등록 시각 내림차순입니다. 열 제목으로 위치를 찾으므로 순서는 바꿀 수 있지만 **열 제목은 유지**하세요. 내부 ID 열은 숨겨집니다. 숨김과 시트 편집 보호는 읽기 접근 제한을 대신하지 않습니다.
+New names are automatically added to the user sheet. Group different spellings of the same person's name as aliases in the canonical name's row. The email in the user sheet takes precedence; if it is absent, individual mail is sent to the account that created the event. Administrator, group, and calendar accounts are not used as individual recipients. Invalid individual addresses cause the notice to be sent to an administrator instead.
 
-이전 시트 구조를 옮길 때 원본은 `예약기록_백업` 시트로 보관합니다. 복구 검증에도 사용하므로 확인 없이 삭제하지 마세요. 주간 이행률은 `사용 / (사용 + 직전 취소)`이며 실제 장비 사용을 측정하는 값은 아닙니다.
+The booking log is sorted by registration time in descending order. Columns are located by their headers, so you may reorder them, but **keep the column headers unchanged**. Internal ID columns are hidden. Hiding columns and protecting sheets from editing do not restrict read access.
 
-## 관리 함수
+When migrating an older sheet structure, the original is preserved in the `예약기록_백업` (booking log backup) sheet. It is also used for recovery verification; review it before deleting it. The weekly fulfillment rate is `usage / (usage + late cancellations)`. It does not measure actual equipment use.
 
-- `previewMondayMails`: 현재 기록으로 만든 브리핑을 관리자에게 실제 메일로 보냅니다. 기본 로그에는 본문을 남기지 않습니다.
-- `protectSheets`: 관리 시트 편집 보호를 다시 적용합니다.
-- `fillUserSheet`: 기존 기록에서 예약자 목록을 보충합니다.
-- `explainFlags`: 규칙 위반 상세 진단. 상세 로그는 `LOG_PERSONAL_DETAILS`가 켜져 있을 때만 출력합니다.
-- `initialSync`: 새 장비 캘린더를 추가한 뒤 그 캘린더의 기록을 초기화합니다.
-- `resetSync`: 모든 캘린더를 알림 없이 다시 읽고 기존 기록과 맞춥니다.
+## Administration functions
 
-## 그룹과 휴대폰 알림
+- `previewMondayMails`: Sends a real briefing email to the administrators using the current records. Email bodies are not included in the default logs.
+- `protectSheets`: Reapplies edit protection to the management sheets.
+- `fillUserSheet`: Adds booker names from existing records to the user sheet.
+- `explainFlags`: Provides detailed diagnostics for rule violations. Detailed logs are output only when `LOG_PERSONAL_DETAILS` is enabled.
+- `initialSync`: Initializes records for a newly added equipment calendar.
+- `resetSync`: Rereads all calendars without notifications and reconciles them with existing records.
 
-관리 계정의 그룹 게시 권한을 허용하고 회원 구독을 **모든 이메일**로 설정합니다. 테스트 메일이 도착하지 않으면 그룹의 검토 대기와 스팸 처리를 확인하세요.
+## Group and phone notifications
 
-Gmail에서 본인 그룹 주소를 대상으로 `list:equipment-group@example.com` 형식의 필터를 만듭니다. 예시 주소를 실제 그룹 주소로 바꾸고 필요에 따라 스팸 예외·중요 표시·기본 카테고리를 설정합니다. 휴대폰 Gmail 앱과 운영체제의 알림도 켭니다. 기관 메일을 사용한다면 해당 서비스의 수신 및 앱 알림 설정을 확인하세요.
+Allow the administrator account to post to the group, and set member subscriptions to **Each email** (receive every message). If a test email does not arrive, check the group's moderation queue and spam handling.
 
-실행·발송 할당량은 계정에 따라 다르고 바뀔 수 있습니다. 대규모 그룹은 실제 수신과 한도를 확인해야 합니다. `safeQuota_()`는 남은 메일 할당량을 확인합니다. 최신 한도는 [공식 Apps Script 할당량 문서](https://developers.google.com/apps-script/guides/services/quotas)를 참고하세요.
+In Gmail, create a filter for your group address using a query such as `list:equipment-group@example.com`. Replace the example address with your real group address. Configure spam exceptions, importance markers, and the Primary category as needed. Also enable notifications in the mobile Gmail app and the operating system. If you use institutional email, check that service's delivery and app notification settings.
 
-## 보안과 개인정보
+Execution and email quotas depend on the account and may change. For large groups, confirm actual delivery and the applicable limits. `safeQuota_()` checks the remaining email quota. See the [official Apps Script quotas documentation](https://developers.google.com/apps-script/guides/services/quotas) for current limits.
 
-공개 파일의 익명화와 운영 데이터 처리는 별개입니다. 실제 설치 후에는 예약자 이름, 일정 제목, 이메일, 캘린더 ID가 관리자 시트와 스크립트 속성에 저장됩니다. 그룹 브리핑과 취소 알림에도 예약자·일정 정보가 포함됩니다. 시트와 그룹의 열람자를 필요한 사람으로 제한하고 알림 범위를 구성원에게 안내하세요.
+## Security and privacy
 
-시트 편집자는 연결된 Apps Script 코드도 바꿀 수 있습니다. 관리 계정만 편집자로 두고 다른 사용자의 접근 권한을 검토하세요. 상세 진단을 켜면 운영 정보가 로그에 남으므로 점검 후 `LOG_PERSONAL_DETAILS: false`로 되돌립니다. 플랫폼 자체 예외 로그는 별도로 관리합니다.
+Anonymizing public files is separate from handling operational data. After installation, real booker names, event titles, email addresses, and calendar IDs are stored in the administrator's sheets and script properties. Group briefings and cancellation notifications also contain booker and event information. Limit sheet and group access to the people who need it, and explain the notification scope to members.
 
-캘린더 입력의 시트 수식 실행 방지, 단일 개인 이메일 검증, HTML 이스케이프, 특수 이름의 통계 처리, 실패 일정 재시도 및 공개 파일 검사를 적용했습니다. 점검 범위는 [보안 점검 기록](docs/SECURITY_REVIEW.md)에 있습니다.
+Spreadsheet editors can also change the bound Apps Script code. Keep editing access limited to the administrator account and review other users' permissions. Detailed diagnostics can write operational information to logs, so return to `LOG_PERSONAL_DETAILS: false` after troubleshooting. Manage platform-generated exception logs separately.
 
-인증, 개인 설정, 실제 시트 내보내기, 운영 로그, 백업은 `.gitignore`로 제외합니다. 실제 설정을 공개 파일에 덮어쓰지 마세요. 자동 검사는 모든 개인정보를 판별하지 못하므로 게시 전 파일도 직접 검토하세요.
+The code includes protections against calendar input becoming spreadsheet formulas, validation of single individual email addresses, HTML escaping, statistics handling for special names, retries for failed events, and checks of public files. The [security review](docs/SECURITY_REVIEW.md) describes the review scope.
 
-## 테스트
+Authentication files, private settings, real sheet exports, operational logs, and backups are excluded by `.gitignore`. Do not overwrite public files with real configuration values. Automated checks cannot identify every kind of personal information; review the files manually before publishing too.
 
-Node.js만 필요하며 외부 패키지 설치는 필요하지 않습니다. 테스트는 모의 환경이며 실제 메일이나 Calendar API를 호출하지 않습니다.
+## Tests
+
+Only Node.js is required; no external packages need to be installed. Tests use mocks and do not send real email or call the Calendar API.
 
 ```bash
 npm test
 ```
 
-PowerShell에서 파일 로딩 순서와 복구 정렬 순서를 추가로 확인할 수 있습니다.
+In PowerShell, you can also check a different file-loading order and recovery sort order:
 
 ```powershell
 $env:SIM_ORDER = 'alpha'
@@ -135,36 +139,36 @@ npm test
 Remove-Item Env:SIM_ORDER, Env:ORDER
 ```
 
-| 테스트 | 검증 |
+| Test | Coverage |
 |---|---|
-| `rules.test.js` | 주 경계, 세션, 직전 취소, 제목 파싱, 중복 순위 |
-| `sim.test.js` | 설치·동기화·알림·브리핑 시나리오 |
-| `recovery.test.js`, `recovery-extra.test.js`, `verify-v4.test.js` | 이전 시트와 백업에서 등록 시각·판정 복구 |
-| `security.test.js` | 수식 입력, 특수 이름, 수신자·헤더, 상세 로그, 실패 재시도 |
-| `privacy.test.js` | 공개 파일의 이메일·컴퓨터 경로·주요 비밀값 패턴 |
+| `rules.test.js` | Week boundaries, sessions, late cancellation, title parsing, and overlap priority. |
+| `sim.test.js` | Installation, synchronization, notifications, and briefing scenarios. |
+| `recovery.test.js`, `recovery-extra.test.js`, `verify-v4.test.js` | Recovery of registration times and classifications from older sheets and backups. |
+| `security.test.js` | Formula input, special names, recipients and headers, detailed logs, and failure retries. |
+| `privacy.test.js` | Email addresses, computer paths, and common secret patterns in public files. |
 
-개별 테스트는 `node tests/rules.test.js`처럼 실행합니다. 시뮬레이션에 `SIM_VERBOSE=1`을 설정하면 통과한 세부 항목도 출력하고 `SIM_ONLY=3,15`는 선택한 시나리오만 실행합니다.
+Run individual tests with commands such as `node tests/rules.test.js`. Set `SIM_VERBOSE=1` to print details for passing simulation checks. Set `SIM_ONLY=3,15` to run only the selected scenarios.
 
-## 구성
+## Repository structure
 
-| 파일 | 역할 |
+| File | Purpose |
 |---|---|
-| `src/Config.gs` | 공개 예시 설정과 예약 정책 |
-| `src/Rules.gs` | 예약·취소·겹침·통계 |
-| `src/Store.gs` | 시트 저장과 복구 |
-| `src/Sync.gs` | 캘린더 변경 감지와 상태 처리 |
-| `src/Notify.gs` | 알림 대기열, 주소 검증, 이메일 |
-| `src/Report.gs` | 월요일 브리핑과 주간 보고 |
-| `src/Setup.gs` | 설치·권한 점검·트리거·진단 |
-| `src/appsscript.json` | Calendar 읽기, 현재 시트, 메일 발송, 트리거 관리 권한 |
-| `tests/fixtures/src-v3/` | 익명화된 과거 버전 복구 fixture. 운영 배포 금지 |
+| `src/Config.gs` | Public example configuration and booking policy. |
+| `src/Rules.gs` | Booking, cancellation, overlap, and statistics rules. |
+| `src/Store.gs` | Sheet storage and recovery. |
+| `src/Sync.gs` | Calendar change detection and state handling. |
+| `src/Notify.gs` | Notification queue, address validation, and email. |
+| `src/Report.gs` | Monday briefings and weekly reports. |
+| `src/Setup.gs` | Installation, access checks, triggers, and diagnostics. |
+| `src/appsscript.json` | Permissions for reading calendars, accessing the current spreadsheet, sending email, and managing triggers. |
+| `tests/fixtures/src-v3/` | Anonymized recovery fixtures from an older version. Do not deploy them. |
 
-## 한계
+## Limitations
 
-- Calendar API는 누가 삭제했는지 알려 주지 않습니다. 예약자는 제목에서 추정합니다.
-- 실제 장비 사용 여부는 캘린더만으로 알 수 없습니다.
-- 삭제 일정의 수정 시각이 없으면 직전 동기화 시각 등을 사용해 보수적으로 판정합니다.
-- 시간 예약을 종일 일정으로 바꾸면 예약 취소로 처리합니다.
-- 메일 실패는 다음 동기화에 재시도합니다. 슬롯이 지났거나 대기 24시간이 지난 알림은 정리합니다.
-- 월요일 캘린더 읽기에 실패하면 브리핑을 최대 30분 미룹니다. 이후 브리핑에는 읽지 못한 캘린더가 빠질 수 있습니다.
-- 모의 테스트는 실제 서비스의 권한·할당량·메일 전달을 보증하지 않습니다. 실제 설치 후 관리자와 그룹 테스트 메일을 확인해야 합니다.
+- The Calendar API does not identify who deleted an event. The booker is inferred from the title.
+- Calendar data alone cannot determine whether equipment was actually used.
+- If a deleted event has no modification time, the script uses the previous synchronization time or other fallback information to classify it conservatively.
+- Converting a timed event to an all-day event is treated as a booking cancellation.
+- Failed emails are retried on the next synchronization. Pending notifications are removed once the slot has passed or they have waited for 24 hours.
+- If calendar reads fail on Monday, the briefing is delayed by up to 30 minutes. After that, the briefing may omit calendars that could not be read.
+- Mock tests do not guarantee real service permissions, quotas, or email delivery. Confirm administrator and group test emails after installation.
